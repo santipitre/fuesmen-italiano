@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      6.2
+// @version      6.3
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe".
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -713,8 +713,8 @@
     if(input){ fillMode(input); return; }
     if(!/pedido-medico-grupo/i.test(location.pathname)) return;
     sbWithToken(function(t){
-      if(t){ startListB(); }
-      else { showLogin(function(){ startListB(); }); }
+      if(t){ enterApp(); }
+      else { showLogin(enterApp); }
     });
   }
 
@@ -745,5 +745,41 @@
     if(LATEST_VER && verCmp(SCRIPT_VER,LATEST_VER)<0) markLoginOutdated(LATEST_VER);
   }
 
+  function enterApp(){ checkMustChange(function(){ startListB(); }); }
+  function checkMustChange(cb){
+    sbWithToken(function(t){
+      if(!t){ cb(); return; }
+      sbReq('GET','/auth/v1/user', t, null,
+        function(u){ var mc = u && u.user_metadata && u.user_metadata.must_change; if(mc){ showChangePassword(cb); } else { cb(); } },
+        function(){ cb(); });
+    });
+  }
+  function showChangePassword(cb){
+    if(document.getElementById('fm-cp')) return;
+    var ov=document.createElement('div'); ov.id='fm-cp';
+    ov.style.cssText='position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-family:Segoe UI,sans-serif';
+    var box=document.createElement('div'); box.style.cssText='background:#fff;padding:22px;border-radius:12px;width:340px;box-shadow:0 10px 40px rgba(0,0,0,.4)';
+    var h=document.createElement('div'); h.style.cssText='font:800 16px Segoe UI;color:#1f2328'; h.textContent='Creá tu contraseña';
+    var sub=document.createElement('div'); sub.style.cssText='font:13px Segoe UI;color:#57606a;margin:4px 0 14px'; sub.textContent='Es tu primer ingreso. Elegí una contraseña nueva (mínimo 6).';
+    var p1=document.createElement('input'); p1.type='password'; p1.placeholder='Nueva contraseña'; p1.style.cssText=inpCss();
+    var p2=document.createElement('input'); p2.type='password'; p2.placeholder='Repetir contraseña'; p2.style.cssText=inpCss();
+    var er=document.createElement('div'); er.style.cssText='color:#d1242f;font:12px Segoe UI;min-height:16px;margin:2px 0 8px';
+    var bt=document.createElement('button'); bt.textContent='Guardar contraseña'; bt.style.cssText='width:100%;font:700 14px Segoe UI;color:#fff;background:#1f6feb;border:0;padding:10px;border-radius:8px;cursor:pointer';
+    function save(){
+      er.textContent='';
+      if((p1.value||'').length<6){ er.textContent='Mínimo 6 caracteres.'; return; }
+      if(p1.value!==p2.value){ er.textContent='No coinciden.'; return; }
+      bt.disabled=true; bt.textContent='Guardando...';
+      sbWithToken(function(t){
+        if(!t){ er.textContent='Sesión vencida, volvé a entrar.'; bt.disabled=false; bt.textContent='Guardar contraseña'; return; }
+        sbReq('PUT','/auth/v1/user', t, { password:p1.value, data:{ must_change:false } },
+          function(){ ov.remove(); cb && cb(); },
+          function(d){ bt.disabled=false; bt.textContent='Guardar contraseña'; er.textContent=(d&&(d.msg||d.error_description||d.message))||'No se pudo cambiar.'; });
+      });
+    }
+    bt.onclick=save; p2.addEventListener('keydown',function(e){ if(e.key==='Enter') save(); });
+    box.appendChild(h); box.appendChild(sub); box.appendChild(p1); box.appendChild(p2); box.appendChild(er); box.appendChild(bt);
+    ov.appendChild(box); document.body.appendChild(ov); p1.focus();
+  }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
 })();
