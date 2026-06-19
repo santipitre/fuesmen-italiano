@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      6.3
+// @version      6.4
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe".
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -691,6 +691,7 @@
   }
 
   function start(){
+    showUpdatedOk();
     checkVersion();
     if(/his\.fuesmen\.edu\.ar/i.test(location.host)){
       function runHis(){
@@ -780,6 +781,19 @@
     bt.onclick=save; p2.addEventListener('keydown',function(e){ if(e.key==='Enter') save(); });
     box.appendChild(h); box.appendChild(sub); box.appendChild(p1); box.appendChild(p2); box.appendChild(er); box.appendChild(bt);
     ov.appendChild(box); document.body.appendChild(ov); p1.focus();
+  }
+  function showUpdatedOk(){
+    try{
+      var last=localStorage.getItem('fuesmen_lastver');
+      if(last && verCmp(last, SCRIPT_VER)<0){
+        var bar=document.createElement('div'); bar.id='fm-ok';
+        bar.style.cssText='position:fixed;top:0;left:0;right:0;z-index:100002;background:#1a7f37;color:#fff;font:800 15px Segoe UI,sans-serif;padding:12px 16px;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 2px 12px rgba(0,0,0,.35)';
+        bar.textContent='✓ Asistente actualizado a v'+SCRIPT_VER+'. Ya podés seguir.';
+        document.body.appendChild(bar);
+        setTimeout(function(){ bar.style.transition='opacity .6s'; bar.style.opacity='0'; setTimeout(function(){ if(bar.parentNode) bar.remove(); },700); }, 6000);
+      }
+      localStorage.setItem('fuesmen_lastver', SCRIPT_VER);
+    }catch(e){}
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
 })();
