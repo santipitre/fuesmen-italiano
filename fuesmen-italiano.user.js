@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      6.4
+// @version      6.5
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe".
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -356,9 +356,29 @@
   var soloMatch=false; try{ soloMatch=localStorage.getItem('fuesmen_solomatch')==='1'; }catch(e){}
   var viewRevisar=false;
   var viewHarefield=false; try{ viewHarefield=localStorage.getItem('fuesmen_harefield')==='1'; }catch(e){}
-  var REVISAR={}; try{ (JSON.parse(localStorage.getItem('fuesmen_revisar')||'[]')||[]).forEach(function(id){ REVISAR[id]=1; }); }catch(e){}
+  var REVISAR={};
   function revSave(){ try{ localStorage.setItem('fuesmen_revisar', JSON.stringify(Object.keys(REVISAR))); }catch(e){} }
   function revCount(){ return Object.keys(REVISAR).length; }
+  function sbFetchRevisar(cb){
+    sbWithToken(function(t){ if(!t){ cb&&cb(); return; }
+      sbReq('GET','/rest/v1/fuesmen_revisar?select=pedido_id', t, null,
+        function(d){ var m={}; (d||[]).forEach(function(x){ m[String(x.pedido_id)]=1; }); REVISAR=m; cb&&cb(); },
+        function(){ cb&&cb(); }); });
+  }
+  function revSet(pedidoId, on){
+    if(!pedidoId) return; pedidoId=String(pedidoId);
+    if(on){ REVISAR[pedidoId]=1; } else { delete REVISAR[pedidoId]; }
+    sbWithToken(function(t){ if(!t) return;
+      if(on){
+        GM_xmlhttpRequest({ method:'POST', url:SB_URL+'/rest/v1/fuesmen_revisar',
+          headers:{ 'apikey':SB_KEY,'Authorization':'Bearer '+t,'Content-Type':'application/json','Prefer':'resolution=ignore-duplicates' },
+          data:JSON.stringify([{ pedido_id:pedidoId, usuario_email:sbEmail(), updated_at:new Date().toISOString() }]) });
+      } else {
+        GM_xmlhttpRequest({ method:'DELETE', url:SB_URL+'/rest/v1/fuesmen_revisar?pedido_id=eq.'+encodeURIComponent(pedidoId),
+          headers:{ 'apikey':SB_KEY,'Authorization':'Bearer '+t } });
+      }
+    });
+  }
   function pedidoId(a){ var m=(a.getAttribute('onclick')||'').match(/informe\((\d+)\)/); return m?m[1]:''; }
   function pedidoRow(a){
     var r=a.closest('tr'); if(r) return r;
@@ -501,7 +521,7 @@
           var rbLbl=function(){ rb.textContent = REVISAR[info.pedidoId] ? '✕ Quitar de "a revisar"' : '📌 Pendiente revisar'; rb.style.background = REVISAR[info.pedidoId] ? '#6e7781' : '#9a6700'; };
           rb.style.cssText='display:inline-block;margin-top:8px;font:700 12px Segoe UI;color:#fff;border:0;padding:6px 12px;border-radius:7px;cursor:pointer';
           rbLbl();
-          rb.onclick=function(ev){ ev.preventDefault(); if(REVISAR[info.pedidoId]) delete REVISAR[info.pedidoId]; else REVISAR[info.pedidoId]=1; revSave(); rbLbl(); applyView(); };
+          rb.onclick=function(ev){ ev.preventDefault(); var on=!REVISAR[info.pedidoId]; revSet(info.pedidoId, on); rbLbl(); applyView(); };
           box.appendChild(rb);
         }
       }
@@ -687,7 +707,8 @@
       toast('Asistente activo · '+list.length+' turnos · '+shortName(sbEmail()),'#0969da');
     });
     sbFetchCargas(applyCargas);
-    setInterval(function(){ sbFetchCargas(applyCargas); }, 15000);
+    sbFetchRevisar(function(){ applyView(); });
+    setInterval(function(){ sbFetchCargas(applyCargas); sbFetchRevisar(function(){ applyView(); applyCargas(); }); }, 15000);
   }
 
   function start(){
