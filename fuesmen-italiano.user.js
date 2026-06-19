@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      6.1
+// @version      6.2
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe".
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -13,6 +13,7 @@
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @connect      kjwsruebchhhrqwicdfx.supabase.co
+// @connect      raw.githubusercontent.com
 // @connect      localhost
 // @connect      127.0.0.1
 // @run-at       document-end
@@ -21,6 +22,42 @@
   'use strict';
   var SB_URL = 'https://kjwsruebchhhrqwicdfx.supabase.co';
   var SB_KEY = 'sb_publishable_VVVtZ9H7Lz3PnOBqgNibKA_b4Uxg6G9';
+  var RAW_URL='https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js';
+  var SCRIPT_VER=(typeof GM_info!=='undefined' && GM_info.script && GM_info.script.version) || '0';
+  var LATEST_VER=null;
+  function verCmp(a,b){ a=(''+a).split('.').map(Number); b=(''+b).split('.').map(Number); for(var i=0;i<Math.max(a.length,b.length);i++){ var x=a[i]||0,y=b[i]||0; if(x!==y) return x<y?-1:1; } return 0; }
+  function fmParseVer(txt){ var i=txt.indexOf('@version'); if(i<0) return null; var rest=txt.slice(i+8, i+30); var vv=''; for(var k=0;k<rest.length;k++){ var ch=rest[k]; if((ch>='0'&&ch<='9')||ch==='.'){ vv+=ch; } else if(vv){ break; } } return vv||null; }
+  function openUpdate(){ try{ window.open(RAW_URL,'_blank'); }catch(e){} }
+  function showUpdateBar(ver){
+    if(document.getElementById('fm-upd')) return;
+    var bar=document.createElement('div'); bar.id='fm-upd';
+    bar.style.cssText='position:fixed;top:0;left:0;right:0;z-index:100002;background:#d1242f;color:#fff;font:800 15px Segoe UI,sans-serif;padding:12px 16px;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;box-shadow:0 2px 12px rgba(0,0,0,.4)';
+    var tx=document.createElement('span'); tx.textContent='⚠ Asistente FUESMEN: hay una versión nueva (v'+ver+'). Tenés que actualizar.';
+    var b=document.createElement('button'); b.textContent='ACTUALIZAR AHORA';
+    b.style.cssText='font:800 14px Segoe UI;color:#d1242f;background:#fff;border:0;padding:8px 18px;border-radius:8px;cursor:pointer';
+    b.onclick=openUpdate;
+    var hint=document.createElement('span'); hint.style.cssText='font:600 12px Segoe UI;opacity:.92'; hint.textContent='(Apretá Actualizar, confirmá en Tampermonkey y recargá la página)';
+    bar.appendChild(tx); bar.appendChild(b); bar.appendChild(hint);
+    document.body.appendChild(bar);
+    setInterval(function(){ if(!document.getElementById('fm-upd')) document.body.appendChild(bar); }, 5000);
+  }
+  function markLoginOutdated(ver){
+    var ov=document.getElementById('fm-login'); if(!ov) return;
+    var box=ov.firstChild; if(!box || box.querySelector('.fm-upd-note')) return;
+    var note=document.createElement('div'); note.className='fm-upd-note';
+    note.style.cssText='background:#fff0f0;border:2px solid #d1242f;border-radius:8px;padding:10px;margin-bottom:12px';
+    var t=document.createElement('div'); t.style.cssText='font:800 13px Segoe UI;color:#d1242f;margin-bottom:6px'; t.textContent='⚠ Hay una versión nueva (v'+ver+'). Actualizá antes de entrar.';
+    var b=document.createElement('button'); b.textContent='Actualizar ahora'; b.style.cssText='width:100%;font:700 13px Segoe UI;color:#fff;background:#d1242f;border:0;padding:9px;border-radius:8px;cursor:pointer'; b.onclick=openUpdate;
+    note.appendChild(t); note.appendChild(b); box.insertBefore(note, box.firstChild);
+  }
+  function checkVersion(){
+    try{
+      GM_xmlhttpRequest({ method:'GET', url:RAW_URL+'?cb='+Date.now(), headers:{'Range':'bytes=0-400','Cache-Control':'no-cache'},
+        onload:function(r){ var ver=fmParseVer(r.responseText||''); if(!ver) return; LATEST_VER=ver;
+          if(verCmp(SCRIPT_VER,LATEST_VER)<0){ showUpdateBar(LATEST_VER); markLoginOutdated(LATEST_VER); } },
+        onerror:function(){} });
+    }catch(e){}
+  }
   var STOP = ['DE','DEL','LA','EL','LOS','LAS','CON','SIN','POR','Y','O','A','EXP','EXPOSICION',
               'PRIMERA','SEGUNDA','OTROS','OTRO','OTRAS','REGIONES','ORGANOS','SIMPLE'];
 
@@ -654,6 +691,7 @@
   }
 
   function start(){
+    checkVersion();
     if(/his\.fuesmen\.edu\.ar/i.test(location.host)){
       function runHis(){
         var h=location.hash||'';
@@ -704,6 +742,7 @@
     bc.onclick=function(){ ov.remove(); };
     box.appendChild(bc);
     ov.appendChild(box); document.body.appendChild(ov); em.focus();
+    if(LATEST_VER && verCmp(SCRIPT_VER,LATEST_VER)<0) markLoginOutdated(LATEST_VER);
   }
 
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
