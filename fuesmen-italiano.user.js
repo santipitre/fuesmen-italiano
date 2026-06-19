@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      6.0
+// @version      6.1
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe".
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -699,6 +699,10 @@
     bt.onclick=doLogin;
     pw.addEventListener('keydown',function(e){ if(e.key==='Enter') doLogin(); });
     box.appendChild(h); box.appendChild(sub); box.appendChild(em); box.appendChild(pw); box.appendChild(er); box.appendChild(bt);
+    var bc=document.createElement('button'); bc.textContent='Cancelar (usar la página sin asistente)';
+    bc.style.cssText='width:100%;font:600 13px Segoe UI;color:#57606a;background:transparent;border:0;padding:8px;margin-top:8px;cursor:pointer;text-decoration:underline';
+    bc.onclick=function(){ ov.remove(); };
+    box.appendChild(bc);
     ov.appendChild(box); document.body.appendChild(ov); em.focus();
   }
 
