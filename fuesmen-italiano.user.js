@@ -1,11 +1,3 @@
-
-fuesmen-italiano_user_6_7-PEGAR-EN-GITHUB.txt
-
-Página
-1
-/
-1
-100 %
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
@@ -861,4 +853,3 @@ Página
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
 })();
-Mostrando fuesmen-italiano_user_6_7-PEGAR-EN-GITHUB.txt.
