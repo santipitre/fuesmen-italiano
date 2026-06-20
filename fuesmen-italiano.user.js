@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      6.5
+// @version      6.6
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe".
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -60,11 +60,16 @@
   }
   var STOP = ['DE','DEL','LA','EL','LOS','LAS','CON','SIN','POR','Y','O','A','EXP','EXPOSICION',
               'PRIMERA','SEGUNDA','OTROS','OTRO','OTRAS','REGIONES','ORGANOS','SIMPLE'];
+  // Sinonimos: A y B nombran distinto el mismo estudio. Canonizamos antes de comparar.
+  var SYN = { TELERX:'TELERRADIOGRAFIA', TELERADIOGRAFIA:'TELERRADIOGRAFIA', TELERAD:'TELERRADIOGRAFIA',
+    RX:'RADIOGRAFIA', RADIOLOGIA:'RADIOGRAFIA', ECO:'ECOGRAFIA', ECODOPPLER:'ECOGRAFIA', DOPPLER:'ECOGRAFIA',
+    DOPP:'ECOGRAFIA', DUPLEX:'ECOGRAFIA', TC:'TOMOGRAFIA', TAC:'TOMOGRAFIA', HELICOIDAL:'TOMOGRAFIA',
+    RMN:'RESONANCIA', RM:'RESONANCIA', RNM:'RESONANCIA', TX:'TORAX' };
 
   // ---- utilidades ----
   function norm(s){ return (s||'').toString().toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
-  function tokens(s){ return norm(s).split(' ').filter(function(t){ return t.length>=3 && STOP.indexOf(t)<0 && !/^[0-9]+$/.test(t); }); }
-  function score(a,b){ var A=tokens(a),B=tokens(b); if(!A.length||!B.length) return 0; var sb={}; B.forEach(function(t){sb[t]=1;}); var i=0; A.forEach(function(t){ if(sb[t]) i++; }); var u={}; A.concat(B).forEach(function(t){u[t]=1;}); return i/Object.keys(u).length; }
+  function tokens(s){ return norm(s).split(' ').map(function(t){ return SYN[t]||t; }).filter(function(t){ return t.length>=3 && STOP.indexOf(t)<0 && !/^[0-9]+$/.test(t); }); }
+  function score(a,b){ var A=tokens(a),B=tokens(b); if(!A.length||!B.length) return 0; var sa={}; A.forEach(function(t){sa[t]=1;}); var sb={}; B.forEach(function(t){sb[t]=1;}); var i=0; Object.keys(sa).forEach(function(t){ if(sb[t]) i++; }); var u={}; A.concat(B).forEach(function(t){u[t]=1;}); return i/Object.keys(u).length; }
   function onlyDigits(s){ return (s||'').replace(/[^0-9]/g,''); }
   function btnCss(c){ return 'font:600 12px Segoe UI;color:#fff;background:'+c+';border:0;padding:3px 10px;border-radius:6px;cursor:pointer;margin-left:4px'; }
   function toast(msg,color){ var d=document.createElement('div'); d.textContent=msg; d.style.cssText='position:fixed;z-index:99999;right:18px;bottom:18px;max-width:380px;background:'+(color||'#0969da')+';color:#fff;padding:12px 16px;border-radius:8px;font:600 14px Segoe UI,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3)'; document.body.appendChild(d); setTimeout(function(){ d.style.transition='opacity .5s'; d.style.opacity='0'; setTimeout(function(){d.remove();},500); },4500); }
@@ -479,15 +484,37 @@
       a.dataset.fmDone='1';
       var info=parseRow(a); if(!info||!info.dni) return;
       var cands=bestForRow(info.dni,info.estudio);
-      if(!cands.length) return;
+      if(!cands.length){
+        // Pedido SIN turno asociado en A: ofrecer buscar el DNI en FUESMEN (±3 dias del pedido)
+        // para confirmar si el estudio se hizo; si no aparece, el operador lo anula.
+        var cellsN=[].slice.call(info.tr.querySelectorAll('td'));
+        var pacN=cellsN.filter(function(c){ return /DNI[-\s]?\d/i.test(c.textContent||''); })[0];
+        var presN=pacN ? pacN.nextElementSibling : null;
+        if(presN && presN.tagName==='TD' && !presN.querySelector('.fm-dni-nomatch')){
+          var wN=document.createElement('div'); wN.className='fm-dni-nomatch'; wN.style.cssText='margin-top:8px';
+          var nb=document.createElement('button'); nb.textContent='\uD83D\uDD0D DNI '+info.dni+' \u00b7 sin turno';
+          nb.title='No hay turno de A asociado. Buscar este DNI en FUESMEN (\u00b13 dias del pedido) para ver si se hizo; si no, anularlo.';
+          nb.style.cssText='font:700 12px Segoe UI;color:#fff;background:#d1242f;border:0;padding:6px 11px;border-radius:7px;cursor:pointer';
+          nb.onclick=function(){ openHisDni(info.dni, info.fechaPedido); };
+          wN.appendChild(nb); presN.appendChild(wN);
+        }
+        return;
+      }
       var box=document.createElement('div'); box.className='fm-panel'; box.style.cssText='margin-top:8px;font-family:Segoe UI,sans-serif';
       function panel(bord,bg){ var p=document.createElement('div'); p.style.cssText='display:inline-flex;align-items:center;gap:14px;padding:8px 14px;border:1px solid '+bord+';border-left:4px solid '+bord+';border-radius:8px;background:'+bg+';max-width:560px'; return p; }
       function cargarBtn(color,fn){ var b=document.createElement('button'); b.textContent='Cargar'; b.style.cssText=btnCss(color)+';padding:7px 16px;font-size:13px'; b.onclick=function(ev){ ev.preventDefault(); fn(); }; return b; }
       {
         var top=cands[0], second=cands[1]?cands[1].sc:0;
-        var strong=(cands.length===1)||(top.sc>=0.5 && (top.sc-second)>=0.2);
-        if(strong){
-          var t=top.c; var nota=(cands.length===1)?'unico turno del DNI':('coincidencia '+Math.round(top.sc*100)+'%');
+        var MIN=0.30;
+        var strong=(top.sc>=0.5 && (top.sc-second)>=0.2);
+        var sole=(cands.length===1 && top.sc>=MIN);
+        if(top.sc<=0){
+          var p0=panel('#d1242f','#fff5f5');
+          var d0=document.createElement('div'); d0.style.cssText='line-height:1.4;font:600 12px Segoe UI;color:#b3261e;max-width:540px';
+          d0.textContent='DNI con '+cands.length+' turno(s) en A, ninguno coincide con este estudio. Verificar a mano (puede faltar el turno en el export).';
+          p0.appendChild(d0); box.appendChild(p0);
+        } else if(strong || sole){
+          var t=top.c; var nota=strong?('coincidencia '+Math.round(top.sc*100)+'%'):('unico turno del DNI \u00b7 '+Math.round(top.sc*100)+'% \u2014 verificar');
           var p1=panel('#2ea043','#eafbf0');
           var d1=document.createElement('div'); d1.style.cssText='line-height:1.4';
           var l1=document.createElement('div'); l1.style.cssText='font:600 13px Segoe UI;color:#1a7f37';
@@ -540,7 +567,7 @@
       if(presCell && presCell.tagName==='TD' && !presCell.querySelector('.fm-dni')){
         var dwrap=document.createElement('div'); dwrap.className='fm-dni'; dwrap.style.cssText='margin-top:8px';
         var dbtn=document.createElement('button'); dbtn.textContent='🔍 DNI '+info.dni;
-        dbtn.title='Buscar este DNI en FUESMEN (rango ±5 días de la fecha del pedido)';
+        dbtn.title='Buscar este DNI en FUESMEN (rango ±3 días de la fecha del pedido)';
         dbtn.style.cssText='font:700 12px Segoe UI;color:#fff;background:#1f6feb;border:0;padding:6px 11px;border-radius:7px;cursor:pointer';
         dbtn.onclick=function(){ openHisDni(info.dni, info.fechaPedido); };
         dwrap.appendChild(dbtn);
@@ -665,10 +692,10 @@
     hisSetVal(campo, dni); campo.style.cssText+=';outline:3px solid #2ee6d6';
     var m=(ref||'').match(/(\d{2})\D(\d{2})\D(\d{4})/);
     var base=m?new Date(+m[3], +m[2]-1, +m[1]):new Date();
-    var d1=new Date(base); d1.setDate(d1.getDate()-5);
-    var d2=new Date(base); d2.setDate(d2.getDate()+5);
+    var d1=new Date(base); d1.setDate(d1.getDate()-3);
+    var d2=new Date(base); d2.setDate(d2.getDate()+3);
     hisRango(d1, d2);
-    hisBuscar('Buscando DNI '+dni+' (±5 días de '+hfmt(base)+')…');
+    hisBuscar('Buscando DNI '+dni+' (±3 días de '+hfmt(base)+')…');
   }
   var PEDIDOMAP={};
   function buildPedidoMap(list){ PEDIDOMAP={}; (list||[]).forEach(function(w){ if(w && w.TurnoN && w.PedidoMed) PEDIDOMAP[String(w.TurnoN)]=w.PedidoMed; }); }
