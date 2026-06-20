@@ -1,7 +1,15 @@
+
+fuesmen-italiano_user_6_7-PEGAR-EN-GITHUB.txt
+
+Página
+1
+/
+1
+100 %
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      6.6
+// @version      6.7
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe".
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -361,6 +369,7 @@
   var soloMatch=false; try{ soloMatch=localStorage.getItem('fuesmen_solomatch')==='1'; }catch(e){}
   var viewRevisar=false;
   var viewHarefield=false; try{ viewHarefield=localStorage.getItem('fuesmen_harefield')==='1'; }catch(e){}
+  var viewSinTurno=false;
   var REVISAR={};
   function revSave(){ try{ localStorage.setItem('fuesmen_revisar', JSON.stringify(Object.keys(REVISAR))); }catch(e){} }
   function revCount(){ return Object.keys(REVISAR).length; }
@@ -421,7 +430,8 @@
       var show;
       if(viewHarefield){ show = /HAREFIELD/i.test(row.textContent||'') && !isRev; }
       else if(viewRevisar){ show = isRev; }
-      else if(soloMatch){ show = !!row.querySelector('.fm-panel') && !isRev; }
+      else if(viewSinTurno){ show = !!row.querySelector('.fm-dni-nomatch') || !!row.querySelector('.fm-panel.fm-noturno'); }
+      else if(soloMatch){ show = !!row.querySelector('.fm-panel') && !row.querySelector('.fm-noturno') && !isRev; }
       else { show = true; }
       row.style.display = show ? '' : 'none';
       markRevisar(row, show && isRev && !viewRevisar);
@@ -451,6 +461,9 @@
     if(b2){ b2.textContent=(viewRevisar?'↩ Volver a la lista':'📌 A revisar')+' ('+revCount()+')'; b2.style.background=viewRevisar?'#9a6700':'#444c56'; }
     if(b5){ var hc=[].slice.call(document.querySelectorAll('[onclick*="informe("]')).filter(function(a){ var r=pedidoRow(a); return r && r.offsetParent!==null && /HAREFIELD/i.test(r.textContent||''); }).length;
       b5.textContent=(viewHarefield?'↩ Ver todas':'🏥 HAREFIELD')+' ('+hc+')'; b5.style.background=viewHarefield?'#8250df':'#6f42c1'; }
+    var b6=document.getElementById('fm-b6');
+    if(b6){ var sc=[].slice.call(document.querySelectorAll('[onclick*="informe("]')).filter(function(a){ var r=pedidoRow(a); return r && (r.querySelector('.fm-dni-nomatch')||r.querySelector('.fm-panel.fm-noturno')); }).length;
+      b6.textContent=(viewSinTurno?'↩ Ver todas':'🚫 SIN TURNO')+' ('+sc+')'; b6.style.background=viewSinTurno?'#a40e26':'#d1242f'; }
   }
   function injectToggle(){
     if(document.getElementById('fm-bar')) return;
@@ -461,17 +474,19 @@
     var b1=document.createElement('button'); b1.id='fm-b1';
     var b2=document.createElement('button'); b2.id='fm-b2';
     var b3=document.createElement('button'); b3.id='fm-b3';
-    [b4,b5,b1,b2,b3].forEach(function(b){ b.style.cssText='font:700 13px Segoe UI;color:#fff;border:0;padding:9px 14px;border-radius:8px;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.3)'; });
+    var b6=document.createElement('button'); b6.id='fm-b6';
+    [b4,b5,b1,b6,b2,b3].forEach(function(b){ b.style.cssText='font:700 13px Segoe UI;color:#fff;border:0;padding:9px 14px;border-radius:8px;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.3)'; });
     b4.onclick=function(){ if(queueActive()){ try{ localStorage.removeItem('fuesmen_queue_active'); localStorage.removeItem('fuesmen_queue'); }catch(e){} toast('Carga en lote detenida.','#9a6700'); updateSafeBtn(); return; } showSafeModal(); };
-    b5.onclick=function(){ viewHarefield=!viewHarefield; if(viewHarefield){ viewRevisar=false; soloMatch=false; try{localStorage.setItem('fuesmen_solomatch','0');}catch(e){} } try{localStorage.setItem('fuesmen_harefield',viewHarefield?'1':'0');}catch(e){} applyView(true); };
-    b1.onclick=function(){ viewRevisar=false; viewHarefield=false; try{localStorage.setItem('fuesmen_harefield','0');}catch(e){} soloMatch=!soloMatch; try{localStorage.setItem('fuesmen_solomatch',soloMatch?'1':'0');}catch(e){} applyView(true); };
-    b2.onclick=function(){ viewHarefield=false; try{localStorage.setItem('fuesmen_harefield','0');}catch(e){} viewRevisar=!viewRevisar; applyView(true); };
+    b5.onclick=function(){ viewSinTurno=false; viewHarefield=!viewHarefield; if(viewHarefield){ viewRevisar=false; soloMatch=false; try{localStorage.setItem('fuesmen_solomatch','0');}catch(e){} } try{localStorage.setItem('fuesmen_harefield',viewHarefield?'1':'0');}catch(e){} applyView(true); };
+    b1.onclick=function(){ viewSinTurno=false; viewRevisar=false; viewHarefield=false; try{localStorage.setItem('fuesmen_harefield','0');}catch(e){} soloMatch=!soloMatch; try{localStorage.setItem('fuesmen_solomatch',soloMatch?'1':'0');}catch(e){} applyView(true); };
+    b2.onclick=function(){ viewSinTurno=false; viewHarefield=false; try{localStorage.setItem('fuesmen_harefield','0');}catch(e){} viewRevisar=!viewRevisar; applyView(true); };
+    b6.onclick=function(){ viewHarefield=false; viewRevisar=false; soloMatch=false; try{localStorage.setItem('fuesmen_harefield','0');localStorage.setItem('fuesmen_solomatch','0');}catch(e){} viewSinTurno=!viewSinTurno; applyView(true); };
     b3.textContent='⬇ Ir al final'; b3.style.background='#444c56';
     b3.onclick=function(){ window.scrollTo({top:document.documentElement.scrollHeight, behavior:'smooth'}); };
     var who=document.createElement('span'); who.style.cssText='font:600 12px Segoe UI;color:#fff;background:#24292f;padding:6px 10px;border-radius:8px'; who.textContent='👤 '+shortName(sbEmail());
     var bx=document.createElement('button'); bx.textContent='Salir'; bx.style.cssText='font:700 12px Segoe UI;color:#fff;background:#6e7781;border:0;padding:9px 12px;border-radius:8px;cursor:pointer';
     bx.onclick=function(){ sbClearSession(); location.reload(); };
-    bar.appendChild(b4); bar.appendChild(b5); bar.appendChild(b1); bar.appendChild(b2); bar.appendChild(b3); bar.appendChild(who); bar.appendChild(bx);
+    bar.appendChild(b4); bar.appendChild(b5); bar.appendChild(b1); bar.appendChild(b6); bar.appendChild(b2); bar.appendChild(b3); bar.appendChild(who); bar.appendChild(bx);
     document.body.appendChild(bar);
     updateToggleLabels(); updateSafeBtn();
   }
@@ -509,6 +524,7 @@
         var strong=(top.sc>=0.5 && (top.sc-second)>=0.2);
         var sole=(cands.length===1 && top.sc>=MIN);
         if(top.sc<=0){
+          box.className+=' fm-noturno';
           var p0=panel('#d1242f','#fff5f5');
           var d0=document.createElement('div'); d0.style.cssText='line-height:1.4;font:600 12px Segoe UI;color:#b3261e;max-width:540px';
           d0.textContent='DNI con '+cands.length+' turno(s) en A, ninguno coincide con este estudio. Verificar a mano (puede faltar el turno en el export).';
@@ -845,3 +861,4 @@
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
 })();
+Mostrando fuesmen-italiano_user_6_7-PEGAR-EN-GITHUB.txt.
