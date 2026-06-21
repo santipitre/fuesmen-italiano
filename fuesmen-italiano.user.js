@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      6.8
+// @version      6.9
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe".
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -503,7 +503,16 @@
           nb.title='No hay turno de A asociado. Buscar este DNI en FUESMEN (\u00b13 dias del pedido) para ver si se hizo; si no, anularlo.';
           nb.style.cssText='font:700 12px Segoe UI;color:#fff;background:#d1242f;border:0;padding:6px 11px;border-radius:7px;cursor:pointer';
           nb.onclick=function(){ openHisDni(info.dni, info.fechaPedido); };
-          wN.appendChild(nb); presN.appendChild(wN);
+          wN.appendChild(nb);
+          if(info.pedidoId){
+            var rbN=document.createElement('button');
+            var rbNl=function(){ rbN.textContent = REVISAR[info.pedidoId] ? '\u2715 Quitar de "a revisar"' : '\uD83D\uDCCC Pendiente revisar'; rbN.style.background = REVISAR[info.pedidoId] ? '#6e7781' : '#9a6700'; };
+            rbN.style.cssText='display:block;margin-top:6px;font:700 12px Segoe UI;color:#fff;border:0;padding:6px 12px;border-radius:7px;cursor:pointer';
+            rbNl();
+            rbN.onclick=function(ev){ ev.preventDefault(); var on=!REVISAR[info.pedidoId]; revSet(info.pedidoId, on); rbNl(); applyView(); };
+            wN.appendChild(rbN);
+          }
+          presN.appendChild(wN);
         }
         return;
       }
