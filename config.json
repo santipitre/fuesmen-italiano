@@ -1,0 +1,20 @@
+{
+  "puerto": 8765,
+  "estadoValido": "REA",
+  "columnas": {
+    "turno": "Turno N°",
+    "documento": "Documento",
+    "paciente": "Paciente",
+    "fecha": "Turno Fecha",
+    "estudio": "Estudio",
+    "estado": "Estado",
+    "servicio": "Servicio",
+    "aseguradora": "Aseguradora",
+    "cuenta": "Cuenta",
+    "tipoTurno": "Tipo Turno",
+    "numFactura": "N° Factura",
+    "numOrden": "N° Orden",
+    "numReferencia": "Nº Referencia"
+  },
+  "_comentario": "Si el HIS cambia los nombres de columna, editá 'columnas'. El motor busca por NOMBRE de encabezado, no por posición, así que tolera que se muevan de lugar."
+}
