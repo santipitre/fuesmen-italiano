@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.3
+// @version      7.4
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote).
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -961,44 +961,55 @@
     var done=c.total-c.buscando;
     bar.textContent='Asistente: buscando SIN TURNO en FUESMEN — '+done+' / '+c.total+' (no cierres esta pestaña)';
   }
-  // --- A: loop AJAX. La grilla se actualiza sin recargar; encadenamos una
-  //     busqueda tras otra y leemos el contador cuando llega la respuesta del
-  //     servlet (PerformanceObserver), para no leer resultados viejos. ---
-  var ST_RUN=false, ST_DONE_LOCAL={};   // ST_DONE_LOCAL: ids ya terminados en esta sesion (por si Supabase tarda en confirmar)
-  function sinturnoWorker(){            // entry del loop (la llama start() y el interval)
-    if(ST_RUN) return;
-    ST_RUN=true;                        // candado SINCRONO: evita que varios timers agarren el mismo DNI
+  // --- A: worker POSTBACK-reentrante. VERIFICADO en vivo: BUSCAR es <input
+  //     type=submit> con POST nativo => RECARGA la pagina. No es AJAX. Por eso
+  //     el estado va en sessionStorage: cada carga (1) lee el resultado de la
+  //     busqueda anterior y (2) dispara la siguiente, que recarga de nuevo. ---
+  var ST_BUSY=false;            // candado sincrono dentro de una misma carga
+  var ST_SEARCHING=false;       // ya disparamos BUSCAR; esperar la recarga (se resetea al recargar)
+  var ST_JUST_DONE=null;        // id recien marcado en ESTA carga (evita repicarlo antes de que Supabase confirme)
+  function sinturnoWorker(){
+    if(ST_SEARCHING || ST_BUSY) return;
+    ST_BUSY=true;
+    var cur=sessionStorage.getItem('fm_st_cur');
     sbStFetchMine(function(jobs){
       var c=stCounts(jobs);
-      var pend=jobs.filter(function(j){ return j.estado==='buscando' && !ST_DONE_LOCAL[j.pedido_id]; });
-      if(!jobs.length || !pend.length){ stBannerA(null); ST_RUN=false; return; }
+      // (1) Veniamos de una busqueda: la pagina ya recargo con su resultado.
+      if(cur){
+        try{ sessionStorage.removeItem('fm_st_cur'); }catch(e){}
+        var job=null; jobs.forEach(function(j){ if(j.pedido_id===cur) job=j; });
+        if(job && job.estado==='buscando'){
+          var doc=document.getElementById('_DOCUMENTOPERSONA');
+          var docVal=doc?onlyDigits(doc.value):'';
+          if(docVal===onlyDigits(job.dni)){
+            var res=hisResultCount();
+            if(res.ok){ sbStSetEstado(cur, res.vacio?'vacio':'con_resultados', res.turnos+' turnos / '+(res.estudios==null?'?':res.estudios)+' estudios'); }
+            else { sbStSetEstado(cur,'error','sin contador tras la recarga'); }
+          } else {
+            sbStSetEstado(cur,'error','doc no coincide tras recarga ('+docVal+' vs '+job.dni+')');
+          }
+        }
+        ST_JUST_DONE=cur; stBannerA(c); ST_BUSY=false;
+        setTimeout(sinturnoWorker, 250);  // pasar al siguiente (misma carga)
+        return;
+      }
+      // (2) Arrancar la proxima busqueda.
+      var pend=jobs.filter(function(j){ return j.estado==='buscando' && j.pedido_id!==ST_JUST_DONE; });
+      if(!jobs.length || !pend.length){ stBannerA(null); ST_BUSY=false; return; }
       stBannerA(c);
-      stRunOne(pend[0], function(){ ST_RUN=false; setTimeout(sinturnoWorker, 150); }); // ST_RUN sigue true durante la busqueda
+      var next=pend[0];
+      try{ sessionStorage.setItem('fm_st_cur', next.pedido_id); }catch(e){}
+      ST_SEARCHING=true; ST_BUSY=false;
+      hisModeDni(next.dni, next.fecha_pedido); // setea doc + rango +-3 + click BUSCAR => RECARGA
+      // Red de seguridad: si en 15s NO recargo (busqueda no se ejecuto), marcar error y seguir.
+      setTimeout(function(){
+        if(sessionStorage.getItem('fm_st_cur')===next.pedido_id){
+          sbStSetEstado(next.pedido_id,'error','no se pudo ejecutar la busqueda en FUESMEN');
+          try{ sessionStorage.removeItem('fm_st_cur'); }catch(e){}
+          ST_SEARCHING=false; setTimeout(sinturnoWorker, 400);
+        }
+      }, 15000);
     });
-  }
-  function stRunOne(job, done){
-    var finished=false, hardTO=null, quietT=null, po=null;
-    function cleanup(){ try{ po && po.disconnect(); }catch(e){} clearTimeout(hardTO); clearTimeout(quietT); }
-    function finish(kind,msg){ if(finished) return; finished=true; ST_DONE_LOCAL[job.pedido_id]=1; cleanup(); sbStSetEstado(job.pedido_id, kind, msg); done(); }
-    function readNow(force){
-      if(finished) return;
-      var docField=document.getElementById('_DOCUMENTOPERSONA');
-      var docVal=docField?onlyDigits(docField.value):'';
-      if(!force && docVal && docVal!==onlyDigits(job.dni)) return; // grilla de otra busqueda; esperar
-      var res=hisResultCount();
-      if(res.ok){ finish(res.vacio?'vacio':'con_resultados', res.turnos+' turnos / '+(res.estudios==null?'?':res.estudios)+' estudios'); return; }
-      if(force){ try{ console.warn('[SINTURNO] no pude leer contador para DNI',job.dni,'| texto cerca de TURNOS:', (document.body.innerText||'').replace(/\s+/g,' ').match(/.{0,40}TURNOS.{0,20}/i)); }catch(e){} finish('error','no pude leer el contador de la grilla'); }
-      else { clearTimeout(quietT); quietT=setTimeout(function(){ readNow(false); }, 500); } // contador aun sin renderizar
-    }
-    try{
-      po=new PerformanceObserver(function(list){
-        var hit=false; list.getEntries().forEach(function(e){ if(/servlet\/hturno/i.test(e.name)) hit=true; });
-        if(hit){ clearTimeout(quietT); quietT=setTimeout(function(){ readNow(false); }, 700); }
-      });
-      po.observe({ entryTypes:['resource'] });
-    }catch(e){ po=null; }
-    hardTO=setTimeout(function(){ readNow(true); }, 12000); // red de seguridad
-    hisModeDni(job.dni, job.fecha_pedido); // llena doc + rango +-3 + BUSCAR (AJAX)
   }
 
   function startListB(){
