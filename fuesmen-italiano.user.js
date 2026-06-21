@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.1
+// @version      7.2
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote).
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -965,14 +965,14 @@
   var ST_RUN=false;
   function sinturnoWorker(){            // entry del loop (la llama start() y el interval)
     if(ST_RUN) return;
+    ST_RUN=true;                        // candado SINCRONO: evita que varios timers agarren el mismo DNI
     sbStFetchMine(function(jobs){
       var c=stCounts(jobs);
-      if(!jobs.length || c.buscando===0){ stBannerA(null); return; }
+      if(!jobs.length || c.buscando===0){ stBannerA(null); ST_RUN=false; return; }
       stBannerA(c);
       var job=null; for(var i=0;i<jobs.length;i++){ if(jobs[i].estado==='buscando'){ job=jobs[i]; break; } }
-      if(!job){ return; }
-      ST_RUN=true;
-      stRunOne(job, function(){ ST_RUN=false; setTimeout(sinturnoWorker, 150); });
+      if(!job){ ST_RUN=false; return; }
+      stRunOne(job, function(){ ST_RUN=false; setTimeout(sinturnoWorker, 150); }); // ST_RUN sigue true durante la busqueda
     });
   }
   function stRunOne(job, done){
@@ -986,7 +986,7 @@
       if(!force && docVal && docVal!==onlyDigits(job.dni)) return; // grilla de otra busqueda; esperar
       var res=hisResultCount();
       if(res.ok){ finish(res.vacio?'vacio':'con_resultados', res.turnos+' turnos / '+(res.estudios==null?'?':res.estudios)+' estudios'); return; }
-      if(force){ finish('error','no pude leer el contador de la grilla'); }
+      if(force){ try{ console.warn('[SINTURNO] no pude leer contador para DNI',job.dni,'| texto cerca de TURNOS:', (document.body.innerText||'').replace(/\s+/g,' ').match(/.{0,40}TURNOS.{0,20}/i)); }catch(e){} finish('error','no pude leer el contador de la grilla'); }
       else { clearTimeout(quietT); quietT=setTimeout(function(){ readNow(false); }, 500); } // contador aun sin renderizar
     }
     try{
