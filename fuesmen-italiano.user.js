@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.2
+// @version      7.3
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote).
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -700,7 +700,9 @@
   function hisBuscar(msg){
     var btn=document.querySelector('input.ui-button-buscar, input[name="BUTTON7"], input[value="BUSCAR" i]');
     if(!btn){ btn=[].slice.call(document.querySelectorAll('input[type=submit],input[type=SUBMIT],input[type=button],button')).filter(function(b){ return /^\s*buscar\s*$/i.test(b.value||b.textContent||''); })[0]; }
-    if(btn){ toast(msg,'#0969da'); setTimeout(function(){ btn.click(); try{ if(btn.form && btn.form.requestSubmit) btn.form.requestSubmit(btn); }catch(e){} }, 450); }
+    // Solo click: dispara el AJAX de GeneXus (igual que cuando lo aprieta una persona).
+    // NO usar requestSubmit(): fuerza un envio nativo y RECARGA la pagina, lo que rompe el loop SIN TURNO.
+    if(btn){ toast(msg,'#0969da'); setTimeout(function(){ btn.click(); }, 300); }
     else { toast('Completado. No encontre BUSCAR; apretalo vos.','#9a6700'); }
   }
   function hisMode(turno){
@@ -962,23 +964,22 @@
   // --- A: loop AJAX. La grilla se actualiza sin recargar; encadenamos una
   //     busqueda tras otra y leemos el contador cuando llega la respuesta del
   //     servlet (PerformanceObserver), para no leer resultados viejos. ---
-  var ST_RUN=false;
+  var ST_RUN=false, ST_DONE_LOCAL={};   // ST_DONE_LOCAL: ids ya terminados en esta sesion (por si Supabase tarda en confirmar)
   function sinturnoWorker(){            // entry del loop (la llama start() y el interval)
     if(ST_RUN) return;
     ST_RUN=true;                        // candado SINCRONO: evita que varios timers agarren el mismo DNI
     sbStFetchMine(function(jobs){
       var c=stCounts(jobs);
-      if(!jobs.length || c.buscando===0){ stBannerA(null); ST_RUN=false; return; }
+      var pend=jobs.filter(function(j){ return j.estado==='buscando' && !ST_DONE_LOCAL[j.pedido_id]; });
+      if(!jobs.length || !pend.length){ stBannerA(null); ST_RUN=false; return; }
       stBannerA(c);
-      var job=null; for(var i=0;i<jobs.length;i++){ if(jobs[i].estado==='buscando'){ job=jobs[i]; break; } }
-      if(!job){ ST_RUN=false; return; }
-      stRunOne(job, function(){ ST_RUN=false; setTimeout(sinturnoWorker, 150); }); // ST_RUN sigue true durante la busqueda
+      stRunOne(pend[0], function(){ ST_RUN=false; setTimeout(sinturnoWorker, 150); }); // ST_RUN sigue true durante la busqueda
     });
   }
   function stRunOne(job, done){
     var finished=false, hardTO=null, quietT=null, po=null;
     function cleanup(){ try{ po && po.disconnect(); }catch(e){} clearTimeout(hardTO); clearTimeout(quietT); }
-    function finish(kind,msg){ if(finished) return; finished=true; cleanup(); sbStSetEstado(job.pedido_id, kind, msg); done(); }
+    function finish(kind,msg){ if(finished) return; finished=true; ST_DONE_LOCAL[job.pedido_id]=1; cleanup(); sbStSetEstado(job.pedido_id, kind, msg); done(); }
     function readNow(force){
       if(finished) return;
       var docField=document.getElementById('_DOCUMENTOPERSONA');
