@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.0
+// @version      7.1
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote).
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -848,10 +848,27 @@
   function stShowProgressModal(){
     var s=stModalShell('fm-st-modal','🚫 Buscando SIN TURNO en FUESMEN…','#1f6feb');
     var body=document.createElement('div'); body.id='fm-st-body'; body.style.cssText='padding:16px;font:14px Segoe UI;color:#1f2328'; s.box.appendChild(body);
-    var foot=document.createElement('div'); foot.style.cssText='padding:10px 16px;border-top:1px solid #eee;font:600 11px Segoe UI;color:#9a6700';
-    foot.textContent='Tené abierta la pestaña de FUESMEN logueada. Podés seguir trabajando; esto corre en segundo plano.';
+    var foot=document.createElement('div'); foot.style.cssText='padding:10px 16px;border-top:1px solid #eee;display:flex;gap:10px;justify-content:space-between;align-items:center';
+    var hint=document.createElement('span'); hint.style.cssText='font:600 11px Segoe UI;color:#9a6700;flex:1';
+    hint.textContent='Tené abierta la pestaña de FUESMEN logueada. Podés seguir trabajando; corre en segundo plano.';
+    var stop=document.createElement('button'); stop.textContent='⛔ Detener';
+    stop.style.cssText='font:800 13px Segoe UI;color:#fff;background:#d1242f;border:0;padding:9px 16px;border-radius:8px;cursor:pointer';
+    stop.onclick=function(){ stStopAll(); };
+    foot.appendChild(hint); foot.appendChild(stop);
     s.box.appendChild(foot);
     stUpdateProgress(stCounts(ST_ITEMS.map(function(){ return {estado:'buscando'}; })));
+  }
+  function stStopAll(){
+    if(ST_POLL){ clearInterval(ST_POLL); ST_POLL=null; }
+    sbWithToken(function(t){ if(!t) return;
+      GM_xmlhttpRequest({ method:'PATCH',
+        url:SB_URL+'/rest/v1/fuesmen_sinturno?estado=eq.buscando&usuario_email=eq.'+encodeURIComponent(sbEmail()),
+        headers:{ 'apikey':SB_KEY,'Authorization':'Bearer '+t,'Content-Type':'application/json','Prefer':'return=minimal' },
+        data:JSON.stringify({ estado:'error', resultado:'detenido por usuario', updated_at:new Date().toISOString() }),
+        onload:function(){ toast('Búsqueda detenida. No se anuló nada.','#9a6700'); },
+        onerror:function(){ toast('No pude avisar al servidor; cerrá la pestaña de FUESMEN para frenar.','#9a6700'); } });
+    });
+    var m=document.getElementById('fm-st-modal'); if(m) m.remove();
   }
   function stUpdateProgress(c){
     var body=document.getElementById('fm-st-body'); if(!body) return;
@@ -942,56 +959,45 @@
     var done=c.total-c.buscando;
     bar.textContent='Asistente: buscando SIN TURNO en FUESMEN — '+done+' / '+c.total+' (no cierres esta pestaña)';
   }
-  var ST_INFLIGHT=false; // evita arrancar dos busquedas a la vez (se resetea al recargar)
-  function stClearCur(){ try{ sessionStorage.removeItem('fm_st_cur'); }catch(e){} ST_INFLIGHT=false; }
-  function sinturnoWorker(){
+  // --- A: loop AJAX. La grilla se actualiza sin recargar; encadenamos una
+  //     busqueda tras otra y leemos el contador cuando llega la respuesta del
+  //     servlet (PerformanceObserver), para no leer resultados viejos. ---
+  var ST_RUN=false;
+  function sinturnoWorker(){            // entry del loop (la llama start() y el interval)
+    if(ST_RUN) return;
     sbStFetchMine(function(jobs){
       var c=stCounts(jobs);
       if(!jobs.length || c.buscando===0){ stBannerA(null); return; }
       stBannerA(c);
-      var cur=sessionStorage.getItem('fm_st_cur');
-      if(cur){
-        var job=null; jobs.forEach(function(j){ if(j.pedido_id===cur) job=j; });
-        if(!job || job.estado!=='buscando'){ stClearCur(); setTimeout(sinturnoNext,300); return; }
-        var docField=document.getElementById('_DOCUMENTOPERSONA');
-        var docVal=docField?onlyDigits(docField.value):'';
-        if(docVal && docVal===onlyDigits(job.dni)){
-          var res=hisResultCount();
-          if(res.ok){ sbStSetEstado(cur, res.vacio?'vacio':'con_resultados', res.turnos+' turnos / '+(res.estudios==null?'?':res.estudios)+' estudios'); }
-          else { sbStSetEstado(cur,'error','no pude leer el contador de la grilla'); }
-          stClearCur();
-          setTimeout(sinturnoNext, 600);
-        }
-        // si el doc todavia no coincide, la grilla no cargo aun; esperamos el proximo tick
-        return;
-      }
-      sinturnoNext(jobs);
+      var job=null; for(var i=0;i<jobs.length;i++){ if(jobs[i].estado==='buscando'){ job=jobs[i]; break; } }
+      if(!job){ return; }
+      ST_RUN=true;
+      stRunOne(job, function(){ ST_RUN=false; setTimeout(sinturnoWorker, 150); });
     });
   }
-  function sinturnoNext(jobs){
-    function go(js){
-      if(ST_INFLIGHT) return;
-      var cur=sessionStorage.getItem('fm_st_cur');
-      var pend=(js||[]).filter(function(j){ return j.estado==='buscando' && j.pedido_id!==cur; });
-      if(!pend.length){ return; }
-      var job=pend[0];
-      ST_INFLIGHT=true;
-      try{ sessionStorage.setItem('fm_st_cur', job.pedido_id); }catch(e){}
-      hisModeDni(job.dni, job.fecha_pedido); // llena doc + rango +-3 + aprieta BUSCAR (recarga o AJAX)
-      // Red de seguridad: si en 10s no se ejecuto la busqueda (campo no hallado, sin recarga),
-      // marcamos error y seguimos. En el caso normal la pagina recarga y este timer muere.
-      setTimeout(function(){
-        if(sessionStorage.getItem('fm_st_cur')===job.pedido_id){
-          var docField=document.getElementById('_DOCUMENTOPERSONA');
-          var docVal=docField?onlyDigits(docField.value):'';
-          if(docVal!==onlyDigits(job.dni)){
-            sbStSetEstado(job.pedido_id,'error','no se pudo ejecutar la busqueda en FUESMEN');
-            stClearCur(); setTimeout(sinturnoWorker, 600);
-          }
-        }
-      }, 10000);
+  function stRunOne(job, done){
+    var finished=false, hardTO=null, quietT=null, po=null;
+    function cleanup(){ try{ po && po.disconnect(); }catch(e){} clearTimeout(hardTO); clearTimeout(quietT); }
+    function finish(kind,msg){ if(finished) return; finished=true; cleanup(); sbStSetEstado(job.pedido_id, kind, msg); done(); }
+    function readNow(force){
+      if(finished) return;
+      var docField=document.getElementById('_DOCUMENTOPERSONA');
+      var docVal=docField?onlyDigits(docField.value):'';
+      if(!force && docVal && docVal!==onlyDigits(job.dni)) return; // grilla de otra busqueda; esperar
+      var res=hisResultCount();
+      if(res.ok){ finish(res.vacio?'vacio':'con_resultados', res.turnos+' turnos / '+(res.estudios==null?'?':res.estudios)+' estudios'); return; }
+      if(force){ finish('error','no pude leer el contador de la grilla'); }
+      else { clearTimeout(quietT); quietT=setTimeout(function(){ readNow(false); }, 500); } // contador aun sin renderizar
     }
-    if(jobs) go(jobs); else sbStFetchMine(go);
+    try{
+      po=new PerformanceObserver(function(list){
+        var hit=false; list.getEntries().forEach(function(e){ if(/servlet\/hturno/i.test(e.name)) hit=true; });
+        if(hit){ clearTimeout(quietT); quietT=setTimeout(function(){ readNow(false); }, 700); }
+      });
+      po.observe({ entryTypes:['resource'] });
+    }catch(e){ po=null; }
+    hardTO=setTimeout(function(){ readNow(true); }, 12000); // red de seguridad
+    hisModeDni(job.dni, job.fecha_pedido); // llena doc + rango +-3 + BUSCAR (AJAX)
   }
 
   function startListB(){
@@ -1033,11 +1039,11 @@
       runHis();
       sbFetchWorklist(function(l){ if(l){ buildPedidoMap(l); annotateHisGrid(); } });
       [500,1300,2600].forEach(function(ms){ setTimeout(annotateHisGrid, ms); });
-      // v7: worker SIN TURNO (procesa la cola propia y reciente)
+      // v7: loop SIN TURNO (se auto-encadena; el interval solo lo arranca si aparecen jobs)
       sinturnoWorker();
-      [900,2000,3500].forEach(function(ms){ setTimeout(sinturnoWorker, ms); });
-      setInterval(sinturnoWorker, 6000);
-      var ht; new MutationObserver(function(){ clearTimeout(ht); ht=setTimeout(function(){ annotateHisGrid(); sinturnoWorker(); },400); }).observe(document.body,{childList:true,subtree:true});
+      [900,2200].forEach(function(ms){ setTimeout(sinturnoWorker, ms); });
+      setInterval(sinturnoWorker, 4000);
+      var ht; new MutationObserver(function(){ clearTimeout(ht); ht=setTimeout(annotateHisGrid,400); }).observe(document.body,{childList:true,subtree:true});
       return;
     }
     var input=document.querySelector('#numero_informe');
