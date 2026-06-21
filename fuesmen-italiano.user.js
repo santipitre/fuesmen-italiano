@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      6.9
-// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe".
+// @version      7.0
+// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote).
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @match        http://hitalianomza.no-ip.org:9000/*
@@ -467,18 +467,21 @@
     var b2=document.createElement('button'); b2.id='fm-b2';
     var b3=document.createElement('button'); b3.id='fm-b3';
     var b6=document.createElement('button'); b6.id='fm-b6';
-    [b4,b5,b1,b6,b2,b3].forEach(function(b){ b.style.cssText='font:700 13px Segoe UI;color:#fff;border:0;padding:9px 14px;border-radius:8px;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.3)'; });
+    var b7=document.createElement('button'); b7.id='fm-b7';
+    [b4,b5,b1,b6,b7,b2,b3].forEach(function(b){ b.style.cssText='font:700 13px Segoe UI;color:#fff;border:0;padding:9px 14px;border-radius:8px;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.3)'; });
     b4.onclick=function(){ if(queueActive()){ try{ localStorage.removeItem('fuesmen_queue_active'); localStorage.removeItem('fuesmen_queue'); }catch(e){} toast('Carga en lote detenida.','#9a6700'); updateSafeBtn(); return; } showSafeModal(); };
     b5.onclick=function(){ viewSinTurno=false; viewHarefield=!viewHarefield; if(viewHarefield){ viewRevisar=false; soloMatch=false; try{localStorage.setItem('fuesmen_solomatch','0');}catch(e){} } try{localStorage.setItem('fuesmen_harefield',viewHarefield?'1':'0');}catch(e){} applyView(true); };
     b1.onclick=function(){ viewSinTurno=false; viewRevisar=false; viewHarefield=false; try{localStorage.setItem('fuesmen_harefield','0');}catch(e){} soloMatch=!soloMatch; try{localStorage.setItem('fuesmen_solomatch',soloMatch?'1':'0');}catch(e){} applyView(true); };
     b2.onclick=function(){ viewSinTurno=false; viewHarefield=false; try{localStorage.setItem('fuesmen_harefield','0');}catch(e){} viewRevisar=!viewRevisar; applyView(true); };
     b6.onclick=function(){ viewHarefield=false; viewRevisar=false; soloMatch=false; try{localStorage.setItem('fuesmen_harefield','0');localStorage.setItem('fuesmen_solomatch','0');}catch(e){} viewSinTurno=!viewSinTurno; applyView(true); };
+    b7.textContent='🤖 Anular SIN TURNO'; b7.style.background='#a40e26'; b7.title='Automatiza los SIN TURNO: busca cada DNI ±3 días en FUESMEN y, con tu confirmación, anula en Italiano los que no tengan turno.';
+    b7.onclick=function(){ startSinTurnoFlow(); };
     b3.textContent='⬇ Ir al final'; b3.style.background='#444c56';
     b3.onclick=function(){ window.scrollTo({top:document.documentElement.scrollHeight, behavior:'smooth'}); };
     var who=document.createElement('span'); who.style.cssText='font:600 12px Segoe UI;color:#fff;background:#24292f;padding:6px 10px;border-radius:8px'; who.textContent='👤 '+shortName(sbEmail());
     var bx=document.createElement('button'); bx.textContent='Salir'; bx.style.cssText='font:700 12px Segoe UI;color:#fff;background:#6e7781;border:0;padding:9px 12px;border-radius:8px;cursor:pointer';
     bx.onclick=function(){ sbClearSession(); location.reload(); };
-    bar.appendChild(b4); bar.appendChild(b5); bar.appendChild(b1); bar.appendChild(b6); bar.appendChild(b2); bar.appendChild(b3); bar.appendChild(who); bar.appendChild(bx);
+    bar.appendChild(b4); bar.appendChild(b5); bar.appendChild(b1); bar.appendChild(b6); bar.appendChild(b7); bar.appendChild(b2); bar.appendChild(b3); bar.appendChild(who); bar.appendChild(bx);
     document.body.appendChild(bar);
     updateToggleLabels(); updateSafeBtn();
   }
@@ -740,6 +743,257 @@
     });
   }
 
+  // ============================================================
+  // ===== SIN TURNO: automatizacion (v7) =======================
+  //  A (FUESMEN) busca el DNI +-3 dias del pedido. Si la grilla
+  //  vuelve VACIA -> candidato a anular. B (Italiano) muestra el
+  //  lote y SOLO anula (baja()) tras confirmacion del operador.
+  //  Puente entre ventanas: tabla Supabase fuesmen_sinturno.
+  // ============================================================
+  function sbStUpsert(rows, cb){
+    sbWithToken(function(t){ if(!t){ cb&&cb(false); return; }
+      GM_xmlhttpRequest({ method:'POST', url:SB_URL+'/rest/v1/fuesmen_sinturno',
+        headers:{ 'apikey':SB_KEY,'Authorization':'Bearer '+t,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates' },
+        data:JSON.stringify(rows),
+        onload:function(r){ cb&&cb(r.status>=200&&r.status<300, r); },
+        onerror:function(){ cb&&cb(false); } });
+    });
+  }
+  function sbStFetchMine(cb){
+    sbWithToken(function(t){ if(!t){ cb&&cb([]); return; }
+      var since=new Date(Date.now()-30*60000).toISOString();
+      var url=SB_URL+'/rest/v1/fuesmen_sinturno?select=pedido_id,informe_id,dni,fecha_pedido,estado,resultado'
+            +'&usuario_email=eq.'+encodeURIComponent(sbEmail())
+            +'&updated_at=gte.'+encodeURIComponent(since)+'&order=updated_at.asc';
+      GM_xmlhttpRequest({ method:'GET', url:url,
+        headers:{ 'apikey':SB_KEY,'Authorization':'Bearer '+t },
+        onload:function(r){ var d=[]; try{ d=JSON.parse(r.responseText)||[]; }catch(e){} cb&&cb(d); },
+        onerror:function(){ cb&&cb([]); } });
+    });
+  }
+  function sbStSetEstado(pedidoId, estado, resultado){
+    sbWithToken(function(t){ if(!t) return;
+      GM_xmlhttpRequest({ method:'PATCH', url:SB_URL+'/rest/v1/fuesmen_sinturno?pedido_id=eq.'+encodeURIComponent(pedidoId),
+        headers:{ 'apikey':SB_KEY,'Authorization':'Bearer '+t,'Content-Type':'application/json','Prefer':'return=minimal' },
+        data:JSON.stringify({ estado:estado, resultado:resultado||'', updated_at:new Date().toISOString() }) });
+    });
+  }
+
+  // ---------- B (Italiano): escaneo + flujo ----------
+  function scanSinTurno(){
+    var out=[], seen={};
+    [].slice.call(document.querySelectorAll('[onclick*="informe("]')).forEach(function(a){
+      if(a.offsetParent===null) return;
+      var info=parseRow(a); if(!info||!info.tr) return;
+      if(!info.tr.querySelector('.fm-dni-nomatch')) return; // SOLO los SIN TURNO reales
+      if(!info.dni) return;
+      var bj=info.tr.querySelector('[onclick*="baja("]');
+      var mb=bj?(bj.getAttribute('onclick')||'').match(/baja\((\d+)\)/):null;
+      if(!mb) return; // sin boton de baja -> no se toca
+      var bajaId=mb[1];
+      if(seen[bajaId]) return; seen[bajaId]=1;
+      out.push({ baja_id:bajaId, informe_id:info.pedidoId||'', dni:onlyDigits(info.dni),
+                 fecha_pedido:info.fechaPedido||'', paciente:info.paciente||'',
+                 estudio:info.estudio||'' });
+    });
+    return out;
+  }
+  var ST_ITEMS=[];      // copia local con paciente (NO se sube a Supabase)
+  var ST_POLL=null;
+  function stItemByPedido(pid){ for(var i=0;i<ST_ITEMS.length;i++){ if(ST_ITEMS[i].baja_id===pid) return ST_ITEMS[i]; } return null; }
+  function startSinTurnoFlow(){
+    if(ST_POLL){ stShowProgressModal(); return; }
+    var items=scanSinTurno();
+    if(!items.length){ toast('No hay pedidos SIN TURNO visibles. Activá la vista 🚫 SIN TURNO primero.','#9a6700'); return; }
+    var ok=window.confirm('Voy a buscar en FUESMEN '+items.length+' DNI (±3 días de la fecha del pedido).\n\nNO se borra nada todavía: al terminar te muestro cuáles quedaron SIN turno para que confirmes la anulación.\n\nDejá abierta la pestaña de FUESMEN. ¿Empezar?');
+    if(!ok) return;
+    ST_ITEMS=items;
+    var rows=items.map(function(it){ return {
+      pedido_id:it.baja_id, informe_id:it.informe_id, dni:it.dni, fecha_pedido:it.fecha_pedido,
+      estado:'buscando', resultado:'', usuario_email:sbEmail(), updated_at:new Date().toISOString() }; });
+    sbStUpsert(rows, function(success){
+      if(!success){ toast('No pude encolar el lote en Supabase. Probá salir y entrar.','#d1242f'); return; }
+      try{ window.open('http://his.fuesmen.edu.ar:8180/his/servlet/hturno?0#fuesmenSinTurno=1','fuesmenHIS'); }catch(e){}
+      toast('Lote encolado ('+rows.length+'). Buscando en FUESMEN…','#1f6feb');
+      stShowProgressModal();
+      ST_POLL=setInterval(stPoll, 3000); stPoll();
+    });
+  }
+  function stCounts(jobs){
+    var c={buscando:0,vacio:0,con:0,anulado:0,error:0,total:jobs.length};
+    jobs.forEach(function(j){ if(j.estado==='buscando')c.buscando++; else if(j.estado==='vacio')c.vacio++;
+      else if(j.estado==='con_resultados')c.con++; else if(j.estado==='anulado')c.anulado++; else if(j.estado==='error')c.error++; });
+    return c;
+  }
+  function stPoll(){
+    sbStFetchMine(function(jobs){
+      // limitar a los del lote actual
+      var mine=jobs.filter(function(j){ return stItemByPedido(j.pedido_id); });
+      var c=stCounts(mine);
+      stUpdateProgress(c);
+      if(c.total && c.buscando===0){ clearInterval(ST_POLL); ST_POLL=null; stShowConfirmDelete(mine); }
+    });
+  }
+  function stModalShell(id,title,color){
+    var old=document.getElementById(id); if(old) old.remove();
+    var ov=document.createElement('div'); ov.id=id;
+    ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-family:Segoe UI,sans-serif';
+    var box=document.createElement('div'); box.style.cssText='background:#fff;max-width:620px;width:92%;max-height:84vh;display:flex;flex-direction:column;border-radius:12px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.4)';
+    var head=document.createElement('div'); head.style.cssText='background:'+color+';color:#fff;padding:12px 16px;font:800 15px Segoe UI;display:flex;justify-content:space-between;align-items:center';
+    var ht=document.createElement('span'); ht.textContent=title; head.appendChild(ht);
+    var x=document.createElement('button'); x.textContent='✕'; x.style.cssText='background:transparent;border:0;color:#fff;font-size:18px;cursor:pointer'; x.onclick=function(){ ov.remove(); }; head.appendChild(x);
+    box.appendChild(head); ov.appendChild(box); document.body.appendChild(ov);
+    return { ov:ov, box:box, head:ht };
+  }
+  function stShowProgressModal(){
+    var s=stModalShell('fm-st-modal','🚫 Buscando SIN TURNO en FUESMEN…','#1f6feb');
+    var body=document.createElement('div'); body.id='fm-st-body'; body.style.cssText='padding:16px;font:14px Segoe UI;color:#1f2328'; s.box.appendChild(body);
+    var foot=document.createElement('div'); foot.style.cssText='padding:10px 16px;border-top:1px solid #eee;font:600 11px Segoe UI;color:#9a6700';
+    foot.textContent='Tené abierta la pestaña de FUESMEN logueada. Podés seguir trabajando; esto corre en segundo plano.';
+    s.box.appendChild(foot);
+    stUpdateProgress(stCounts(ST_ITEMS.map(function(){ return {estado:'buscando'}; })));
+  }
+  function stUpdateProgress(c){
+    var body=document.getElementById('fm-st-body'); if(!body) return;
+    var done=c.total-c.buscando;
+    body.innerHTML='<div style="font:700 14px Segoe UI;margin-bottom:8px">Progreso: '+done+' / '+c.total+'</div>'
+      +'<div style="height:10px;background:#eee;border-radius:6px;overflow:hidden;margin-bottom:14px"><div style="height:100%;width:'+(c.total?Math.round(done/c.total*100):0)+'%;background:#1f6feb"></div></div>'
+      +'<div style="display:flex;gap:18px;flex-wrap:wrap;font:600 13px Segoe UI">'
+      +'<span style="color:#1f6feb">🔎 Buscando: '+c.buscando+'</span>'
+      +'<span style="color:#d1242f">🗑 Sin turno (anular): '+c.vacio+'</span>'
+      +'<span style="color:#1a7f37">✓ Con turno: '+c.con+'</span>'
+      +(c.error?'<span style="color:#9a6700">⚠ Error: '+c.error+'</span>':'')
+      +'</div>';
+  }
+  function stShowConfirmDelete(jobs){
+    var vacios=jobs.filter(function(j){ return j.estado==='vacio'; });
+    var con=jobs.filter(function(j){ return j.estado==='con_resultados'; });
+    var errs=jobs.filter(function(j){ return j.estado==='error'; });
+    var s=stModalShell('fm-st-modal','🗑 Confirmar anulación ('+vacios.length+')','#d1242f');
+    var body=document.createElement('div'); body.style.cssText='overflow:auto;padding:12px 16px;flex:1';
+    if(con.length){
+      var note=document.createElement('div'); note.style.cssText='background:#eafbf0;border:1px solid #2ea043;border-radius:8px;padding:8px 10px;margin-bottom:10px;font:600 12px Segoe UI;color:#1a7f37';
+      note.textContent='ℹ '+con.length+' pedido(s) SÍ tienen turno en FUESMEN (±3 días) aunque faltaban en el export. NO se anulan: revisalos a mano.';
+      body.appendChild(note);
+    }
+    if(errs.length){
+      var en=document.createElement('div'); en.style.cssText='background:#fff8e5;border:1px solid #e0a106;border-radius:8px;padding:8px 10px;margin-bottom:10px;font:600 12px Segoe UI;color:#8a5a00';
+      en.textContent='⚠ '+errs.length+' no se pudieron leer en FUESMEN. NO se anulan (quedan para revisar a mano).';
+      body.appendChild(en);
+    }
+    if(!vacios.length){ var nd=document.createElement('div'); nd.style.cssText='color:#57606a;font:500 13px Segoe UI;padding:8px'; nd.textContent='No quedó ningún pedido para anular.'; body.appendChild(nd); }
+    else {
+      var hint=document.createElement('div'); hint.style.cssText='font:600 12px Segoe UI;color:#b3261e;margin-bottom:8px';
+      hint.textContent='Estos pedidos NO tienen turno en FUESMEN en ±3 días. Al confirmar se anulan en Italiano (irreversible):';
+      body.appendChild(hint);
+      var tbl=document.createElement('table'); tbl.style.cssText='width:100%;border-collapse:collapse;font:13px Segoe UI';
+      var hr=document.createElement('tr'); hr.style.cssText='text-align:left;color:#57606a;border-bottom:2px solid #eee';
+      hr.innerHTML='<th style="padding:4px;width:28px"></th><th>Fecha</th><th>DNI</th><th>Paciente</th><th>Pedido</th>'; tbl.appendChild(hr);
+      vacios.forEach(function(j){ var it=stItemByPedido(j.pedido_id)||{};
+        var tr=document.createElement('tr'); tr.style.cssText='border-bottom:1px solid #f0f0f0';
+        var cb='<td style="padding:4px"><input type="checkbox" class="fm-st-ck" data-pid="'+j.pedido_id+'" checked></td>';
+        tr.innerHTML=cb+'<td style="color:#57606a">'+(it.fecha_pedido||'')+'</td><td>'+(it.dni||j.dni)+'</td>'
+          +'<td style="color:#1f2328">'+(it.paciente||'')+'</td><td style="color:#1f6feb;font-weight:700">'+(it.estudio||'').slice(0,30)+'</td>';
+        tbl.appendChild(tr); });
+      body.appendChild(tbl);
+    }
+    s.box.appendChild(body);
+    var foot=document.createElement('div'); foot.style.cssText='padding:12px 16px;border-top:1px solid #eee;display:flex;gap:10px;justify-content:flex-end;align-items:center';
+    var cancel=document.createElement('button'); cancel.textContent='Cerrar (no anular)';
+    cancel.style.cssText='font:700 13px Segoe UI;color:#24292f;background:#eaeef2;border:0;padding:9px 14px;border-radius:8px;cursor:pointer';
+    cancel.onclick=function(){ s.ov.remove(); };
+    var del=document.createElement('button'); del.textContent='🗑 Anular seleccionados';
+    del.style.cssText='font:800 14px Segoe UI;color:#fff;background:'+(vacios.length?'#d1242f':'#6e7781')+';border:0;padding:10px 18px;border-radius:9px;cursor:'+(vacios.length?'pointer':'default'); del.disabled=!vacios.length;
+    del.onclick=function(){
+      var cks=[].slice.call(document.querySelectorAll('.fm-st-ck')).filter(function(c){ return c.checked; });
+      var pids=cks.map(function(c){ return c.getAttribute('data-pid'); });
+      if(!pids.length){ toast('No seleccionaste ninguno.','#9a6700'); return; }
+      if(!window.confirm('Vas a ANULAR '+pids.length+' pedido(s) en Italiano. Es IRREVERSIBLE. ¿Confirmás?')) return;
+      s.ov.remove(); stDeleteSequential(pids, 0);
+    };
+    foot.appendChild(cancel); foot.appendChild(del); s.box.appendChild(foot);
+  }
+  function stDeleteSequential(pids, i){
+    if(i>=pids.length){ toast('✅ Anulación terminada ('+pids.length+').','#1a7f37'); applyView(); return; }
+    var pid=pids[i];
+    var a=document.querySelector('[onclick*="baja('+pid+')"]');
+    if(a){ a.click(); sbStSetEstado(pid,'anulado','baja() ok'); toast('Anulado pedido '+pid+' ('+(i+1)+'/'+pids.length+')…','#d1242f'); }
+    else { sbStSetEstado(pid,'anulado','fila no encontrada (¿ya estaba anulada?)'); }
+    setTimeout(function(){ stDeleteSequential(pids, i+1); }, 1400);
+  }
+
+  // ---------- A (FUESMEN): worker re-entrante ----------
+  function hisResultCount(){
+    var txt=(document.body.innerText||document.body.textContent||'');
+    var mt=txt.match(/(\d+)\s*TURNOS/i);
+    var me=txt.match(/(\d+)\s*ESTUDIOS/i);
+    if(!mt) return { ok:false };
+    var turnos=parseInt(mt[1],10);
+    var estudios=me?parseInt(me[1],10):null;
+    var vacio=(turnos===0 && (estudios===null || estudios===0));
+    return { ok:true, turnos:turnos, estudios:estudios, vacio:vacio };
+  }
+  function stBannerA(c){
+    var bar=document.getElementById('fm-st-banner');
+    if(!c){ if(bar) bar.remove(); return; }
+    if(!bar){ bar=document.createElement('div'); bar.id='fm-st-banner';
+      bar.style.cssText='position:fixed;top:0;left:0;right:0;z-index:100002;background:#1f6feb;color:#fff;font:800 14px Segoe UI;padding:10px 16px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.35)';
+      document.body.appendChild(bar); }
+    var done=c.total-c.buscando;
+    bar.textContent='Asistente: buscando SIN TURNO en FUESMEN — '+done+' / '+c.total+' (no cierres esta pestaña)';
+  }
+  var ST_INFLIGHT=false; // evita arrancar dos busquedas a la vez (se resetea al recargar)
+  function stClearCur(){ try{ sessionStorage.removeItem('fm_st_cur'); }catch(e){} ST_INFLIGHT=false; }
+  function sinturnoWorker(){
+    sbStFetchMine(function(jobs){
+      var c=stCounts(jobs);
+      if(!jobs.length || c.buscando===0){ stBannerA(null); return; }
+      stBannerA(c);
+      var cur=sessionStorage.getItem('fm_st_cur');
+      if(cur){
+        var job=null; jobs.forEach(function(j){ if(j.pedido_id===cur) job=j; });
+        if(!job || job.estado!=='buscando'){ stClearCur(); setTimeout(sinturnoNext,300); return; }
+        var docField=document.getElementById('_DOCUMENTOPERSONA');
+        var docVal=docField?onlyDigits(docField.value):'';
+        if(docVal && docVal===onlyDigits(job.dni)){
+          var res=hisResultCount();
+          if(res.ok){ sbStSetEstado(cur, res.vacio?'vacio':'con_resultados', res.turnos+' turnos / '+(res.estudios==null?'?':res.estudios)+' estudios'); }
+          else { sbStSetEstado(cur,'error','no pude leer el contador de la grilla'); }
+          stClearCur();
+          setTimeout(sinturnoNext, 600);
+        }
+        // si el doc todavia no coincide, la grilla no cargo aun; esperamos el proximo tick
+        return;
+      }
+      sinturnoNext(jobs);
+    });
+  }
+  function sinturnoNext(jobs){
+    function go(js){
+      if(ST_INFLIGHT) return;
+      var cur=sessionStorage.getItem('fm_st_cur');
+      var pend=(js||[]).filter(function(j){ return j.estado==='buscando' && j.pedido_id!==cur; });
+      if(!pend.length){ return; }
+      var job=pend[0];
+      ST_INFLIGHT=true;
+      try{ sessionStorage.setItem('fm_st_cur', job.pedido_id); }catch(e){}
+      hisModeDni(job.dni, job.fecha_pedido); // llena doc + rango +-3 + aprieta BUSCAR (recarga o AJAX)
+      // Red de seguridad: si en 10s no se ejecuto la busqueda (campo no hallado, sin recarga),
+      // marcamos error y seguimos. En el caso normal la pagina recarga y este timer muere.
+      setTimeout(function(){
+        if(sessionStorage.getItem('fm_st_cur')===job.pedido_id){
+          var docField=document.getElementById('_DOCUMENTOPERSONA');
+          var docVal=docField?onlyDigits(docField.value):'';
+          if(docVal!==onlyDigits(job.dni)){
+            sbStSetEstado(job.pedido_id,'error','no se pudo ejecutar la busqueda en FUESMEN');
+            stClearCur(); setTimeout(sinturnoWorker, 600);
+          }
+        }
+      }, 10000);
+    }
+    if(jobs) go(jobs); else sbStFetchMine(go);
+  }
+
   function startListB(){
     function go(list){
       if(!Array.isArray(list)) list=[list];
@@ -779,7 +1033,11 @@
       runHis();
       sbFetchWorklist(function(l){ if(l){ buildPedidoMap(l); annotateHisGrid(); } });
       [500,1300,2600].forEach(function(ms){ setTimeout(annotateHisGrid, ms); });
-      var ht; new MutationObserver(function(){ clearTimeout(ht); ht=setTimeout(annotateHisGrid,400); }).observe(document.body,{childList:true,subtree:true});
+      // v7: worker SIN TURNO (procesa la cola propia y reciente)
+      sinturnoWorker();
+      [900,2000,3500].forEach(function(ms){ setTimeout(sinturnoWorker, ms); });
+      setInterval(sinturnoWorker, 6000);
+      var ht; new MutationObserver(function(){ clearTimeout(ht); ht=setTimeout(function(){ annotateHisGrid(); sinturnoWorker(); },400); }).observe(document.body,{childList:true,subtree:true});
       return;
     }
     var input=document.querySelector('#numero_informe');
