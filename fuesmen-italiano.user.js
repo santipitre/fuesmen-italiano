@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      6.7
+// @version      6.8
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe".
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -101,13 +101,13 @@
       function(d){ if(d && d.access_token){ s.access_token=d.access_token; s.refresh_token=d.refresh_token||s.refresh_token; s.expires_at=(Date.now()/1000)+(d.expires_in||3600); sbSetSession(s); cb(s.access_token); } else { sbClearSession(); cb(null); } },
       function(){ sbClearSession(); cb(null); });
   }
-  function mapWl(w){ return { TurnoN:w.turno_n, DNI:w.dni, Fecha:w.fecha||'', Practicas:w.practicas||'', Alerta:(w.alerta?'SI':''), Aseguradora:w.aseguradora||'', PedidoMed:w.pedido_med||'', Revisar:'' }; }
+  function mapWl(w){ return { TurnoN:w.turno_n, DNI:w.dni, Fecha:w.fecha||'', Practicas:w.practicas||'', Alerta:(w.alerta?'SI':''), Aseguradora:w.aseguradora||'', Cuenta:w.cuenta||'', PedidoMed:w.pedido_med||'', Revisar:'' }; }
   function sbFetchWorklist(cb){
     sbWithToken(function(t){ if(!t){ cb(null); return; }
       var out=[], page=0, size=1000;
       function next(){
         var from=page*size, to=from+size-1;
-        GM_xmlhttpRequest({ method:'GET', url:SB_URL+'/rest/v1/fuesmen_worklist?select=turno_n,pedido_med,dni,practicas,fecha,alerta,aseguradora',
+        GM_xmlhttpRequest({ method:'GET', url:SB_URL+'/rest/v1/fuesmen_worklist?select=turno_n,pedido_med,dni,practicas,fecha,alerta,aseguradora,cuenta',
           headers:{ 'apikey':SB_KEY, 'Authorization':'Bearer '+t, 'Range-Unit':'items', 'Range':from+'-'+to },
           onload:function(r){ var d=[]; try{ d=JSON.parse(r.responseText)||[]; }catch(e){}
             out=out.concat(d);
@@ -222,7 +222,7 @@
 
   // ---- MODO 1: lista de pedidos ----
   var DNIMAP={};
-  function buildIndex(list){ DNIMAP={}; list.forEach(function(w){ var dni=onlyDigits(w.DNI); if(!dni) return; if(!DNIMAP[dni]) DNIMAP[dni]=[]; DNIMAP[dni].push({ turno:String(w.TurnoN), fecha:w.Fecha||'', practicas:(w.Practicas||'').split('|').map(function(x){return x.trim();}).filter(Boolean), revisar:w.Revisar==='SI', alerta:w.Alerta==='SI', aseg:w.Aseguradora||'' }); }); }
+  function buildIndex(list){ DNIMAP={}; list.forEach(function(w){ var dni=onlyDigits(w.DNI); if(!dni) return; if(!DNIMAP[dni]) DNIMAP[dni]=[]; DNIMAP[dni].push({ turno:String(w.TurnoN), fecha:w.Fecha||'', practicas:(w.Practicas||'').split('|').map(function(x){return x.trim();}).filter(Boolean), revisar:w.Revisar==='SI', alerta:w.Alerta==='SI', aseg:w.Aseguradora||'', cuenta:w.Cuenta||'' }); }); }
   function bestForRow(dni,estudioB){ var arr=DNIMAP[onlyDigits(dni)]||[]; var cands=arr.map(function(c){ var sc=0; c.practicas.forEach(function(p){ var s=score(estudioB,p); if(s>sc) sc=s; }); return {c:c,sc:sc}; }); cands.sort(function(a,b){ return b.sc-a.sc; }); return cands; }
   function parseRow(anchor){
     var tr=anchor.closest('tr'); if(!tr) return null;
@@ -591,6 +591,13 @@
           asl.style.cssText='margin-top:6px;font:600 12px Segoe UI;color:#1f2328;background:#fff3bf;border:1px solid #ffe066;padding:4px 9px;border-radius:6px;display:inline-block';
           asl.textContent='Aseguradora: '+aseg;
           dwrap.appendChild(asl);
+        }
+        var cuenta=cands[0] && cands[0].c.cuenta;
+        if(cuenta){
+          var cul=document.createElement('div');
+          cul.style.cssText='margin-top:6px;font:600 12px Segoe UI;color:#1f2328;background:#e7f5ff;border:1px solid #a5d8ff;padding:4px 9px;border-radius:6px;display:inline-block';
+          cul.textContent='Cuenta: '+cuenta;
+          dwrap.appendChild(cul);
         }
         presCell.appendChild(dwrap);
       }
