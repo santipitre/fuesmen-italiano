@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.9
-// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref".
+// @version      7.10
+// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja().
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @match        http://hitalianomza.no-ip.org:9000/*
@@ -944,18 +944,74 @@
       var cks=[].slice.call(document.querySelectorAll('.fm-st-ck')).filter(function(c){ return c.checked; });
       var pids=cks.map(function(c){ return c.getAttribute('data-pid'); });
       if(!pids.length){ toast('No seleccionaste ninguno.','#9a6700'); return; }
-      if(!window.confirm('Vas a ANULAR '+pids.length+' pedido(s) en Italiano. Es IRREVERSIBLE. ¿Confirmás?')) return;
-      s.ov.remove(); stDeleteSequential(pids, 0);
+      if(!window.confirm('Vas a ANULAR '+pids.length+' pedido(s) en Italiano, en tandas de '+ANUL_BATCH+' con confirmación. Es IRREVERSIBLE. ¿Confirmás?')) return;
+      s.ov.remove(); anularStart(pids);
     };
     foot.appendChild(cancel); foot.appendChild(del); s.box.appendChild(foot);
   }
-  function stDeleteSequential(pids, i){
-    if(i>=pids.length){ toast('✅ Anulación terminada ('+pids.length+').','#1a7f37'); applyView(); return; }
-    var pid=pids[i];
+  // ---- Anulacion SIN TURNO: cola que SOBREVIVE las recargas (baja() recarga la pagina) ----
+  //  Cada baja() hace un postback nativo que recarga el Italiano y borraria el loop en memoria.
+  //  Por eso la lista de pedidos a anular vive en localStorage; en cada carga se reanuda sola.
+  //  Procesa en tandas de ANUL_BATCH con confirmacion entre tandas y un boton PARAR.
+  var ANUL_BATCH=20, ANUL_TRIES=0, ANUL_BUSY=false;
+  function anularActive(){ try{ return localStorage.getItem('fuesmen_anular_active')==='1'; }catch(e){ return false; } }
+  function anularGet(){ try{ return JSON.parse(localStorage.getItem('fuesmen_anular')||'[]'); }catch(e){ return []; } }
+  function anularSet(q){ try{ localStorage.setItem('fuesmen_anular', JSON.stringify(q)); }catch(e){} }
+  function anularNum(k,d){ var v; try{ v=parseInt(localStorage.getItem(k),10); }catch(e){ v=NaN; } return isNaN(v)?d:v; }
+  function anularSetNum(k,v){ try{ localStorage.setItem(k,String(v)); }catch(e){} }
+  function anularStop(msg){ try{ ['fuesmen_anular','fuesmen_anular_active','fuesmen_anular_batchleft','fuesmen_anular_done','fuesmen_anular_total'].forEach(function(k){ localStorage.removeItem(k); }); }catch(e){} var b=document.getElementById('fm-anular-stop'); if(b) b.remove(); if(msg) toast(msg,'#9a6700'); }
+  function anularStart(pids){
+    anularSet(pids);
+    anularSetNum('fuesmen_anular_total', pids.length);
+    anularSetNum('fuesmen_anular_done', 0);
+    anularSetNum('fuesmen_anular_batchleft', ANUL_BATCH);
+    try{ localStorage.setItem('fuesmen_anular_active','1'); }catch(e){}
+    anularStopBtn(); anularProcess();
+  }
+  function anularStopBtn(){
+    var b=document.getElementById('fm-anular-stop');
+    if(!b){ b=document.createElement('button'); b.id='fm-anular-stop';
+      b.style.cssText='position:fixed;left:16px;bottom:16px;z-index:100002;font:800 14px Segoe UI;color:#fff;background:#d1242f;border:0;padding:11px 18px;border-radius:10px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.4)';
+      b.onclick=function(){ anularStop('Anulación detenida ('+anularNum('fuesmen_anular_done',0)+'/'+anularNum('fuesmen_anular_total',0)+').'); };
+      document.body.appendChild(b);
+    }
+    b.textContent='⛔ PARAR anulación ('+anularGet().length+' restantes)';
+  }
+  function anularPauseDialog(done,total,left){
+    var s=stModalShell('fm-anular-pause','✋ Tanda completada','#9a6700');
+    var body=document.createElement('div'); body.style.cssText='padding:16px;font:600 14px Segoe UI;color:#1f2328;line-height:1.5';
+    body.innerHTML='Anulaste <b>'+done+'</b> de <b>'+total+'</b>. Quedan <b>'+left+'</b>.<br><br>¿Seguir con la próxima tanda de hasta '+ANUL_BATCH+'?';
+    s.box.appendChild(body);
+    var foot=document.createElement('div'); foot.style.cssText='padding:12px 16px;border-top:1px solid #eee;display:flex;gap:10px;justify-content:flex-end';
+    var stop=document.createElement('button'); stop.textContent='Parar acá'; stop.style.cssText='font:700 13px Segoe UI;color:#24292f;background:#eaeef2;border:0;padding:9px 14px;border-radius:8px;cursor:pointer';
+    stop.onclick=function(){ s.ov.remove(); anularStop('Anulación detenida ('+done+'/'+total+').'); };
+    var cont=document.createElement('button'); cont.textContent='Continuar tanda'; cont.style.cssText='font:800 14px Segoe UI;color:#fff;background:#d1242f;border:0;padding:10px 18px;border-radius:9px;cursor:pointer';
+    cont.onclick=function(){ s.ov.remove(); anularSetNum('fuesmen_anular_batchleft', ANUL_BATCH); anularProcess(); };
+    foot.appendChild(stop); foot.appendChild(cont); s.box.appendChild(foot);
+  }
+  function anularProcess(){
+    if(!anularActive() || ANUL_BUSY) return;
+    var q=anularGet();
+    var done=anularNum('fuesmen_anular_done',0), total=anularNum('fuesmen_anular_total',0);
+    if(!q.length){ anularStop(); toast('✅ Anulación terminada ('+done+'/'+total+'). Recargá para ver la lista.','#1a7f37'); return; }
+    anularStopBtn();
+    var bleft=anularNum('fuesmen_anular_batchleft', ANUL_BATCH);
+    if(bleft<=0){ anularPauseDialog(done,total,q.length); return; }
+    var pid=q[0];
     var a=document.querySelector('[onclick*="baja('+pid+')"]');
-    if(a){ a.click(); sbStSetEstado(pid,'anulado','baja() ok'); toast('Anulado pedido '+pid+' ('+(i+1)+'/'+pids.length+')…','#d1242f'); }
-    else { sbStSetEstado(pid,'anulado','fila no encontrada (¿ya estaba anulada?)'); }
-    setTimeout(function(){ stDeleteSequential(pids, i+1); }, 1400);
+    if(!a){
+      if(ANUL_TRIES++ < 12){ setTimeout(anularProcess, 600); return; }
+      ANUL_TRIES=0; q.shift(); anularSet(q); sbStSetEstado(pid,'error','no encontrado en Italiano (no se anuló)');
+      setTimeout(anularProcess, 200); return;
+    }
+    ANUL_TRIES=0; ANUL_BUSY=true;
+    q.shift(); anularSet(q);
+    anularSetNum('fuesmen_anular_batchleft', bleft-1);
+    anularSetNum('fuesmen_anular_done', done+1);
+    sbStSetEstado(pid,'anulado','baja() ok');
+    anularStopBtn();
+    toast('Anulando '+pid+' ('+(done+1)+'/'+total+')…','#d1242f');
+    a.click(); // recarga la pagina; anularProcess se reanuda al cargar
   }
 
   // ---------- A (FUESMEN): worker re-entrante ----------
@@ -1057,6 +1113,7 @@
       }
     }
     injectToggle();
+    if(anularActive()){ anularStopBtn(); setTimeout(anularProcess, 700); return; }
     sbFetchUsuarios(function(){});
 
     // 1) PINTAR YA desde cache (si hay): saca la latencia de red del camino critico.
