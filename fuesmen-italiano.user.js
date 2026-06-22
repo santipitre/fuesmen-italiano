@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.7
-// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio.
+// @version      7.8
+// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno).
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @match        http://hitalianomza.no-ip.org:9000/*
@@ -508,6 +508,19 @@
       if(a.dataset.fmDone) return;
       if(a.offsetParent===null) return;
       a.dataset.fmDone='1';
+      // Pedido N° en TODAS las filas (incl. las "sin turno", antes de cualquier return)
+      (function(){
+        var prow=pedidoRow(a); if(!prow) return;
+        var prtA=prow.querySelector('[onclick*="prt("]'); if(!prtA) return;
+        var mp=(prtA.getAttribute('onclick')||'').match(/prt\((\d+)\)/);
+        var acc=prtA.closest('td')||prtA.parentNode;
+        if(mp && acc && !acc.querySelector('.fm-pedido')){
+          var pn=document.createElement('div'); pn.className='fm-pedido';
+          pn.style.cssText='font:800 13px Segoe UI;color:#1f6feb;margin-bottom:6px;white-space:nowrap';
+          pn.textContent='Pedido N° '+mp[1];
+          acc.insertBefore(pn, acc.firstChild);
+        }
+      })();
       var info=parseRow(a); if(!info||!info.dni) return;
       var cands=bestForRow(info.dni,info.estudio);
       if(!cands.length){
@@ -628,17 +641,6 @@
           dwrap.appendChild(cul);
         }
         presCell.appendChild(dwrap);
-      }
-      var prtA=info.tr.querySelector('[onclick*="prt("]');
-      if(prtA){
-        var mp=(prtA.getAttribute('onclick')||'').match(/prt\((\d+)\)/);
-        var acc=prtA.closest('td')||prtA.parentNode;
-        if(mp && acc && !acc.querySelector('.fm-pedido')){
-          var pn=document.createElement('div'); pn.className='fm-pedido';
-          pn.style.cssText='font:800 13px Segoe UI;color:#1f6feb;margin-bottom:6px;white-space:nowrap';
-          pn.textContent='Pedido N° '+mp[1];
-          acc.insertBefore(pn, acc.firstChild);
-        }
       }
       var target=cells.filter(function(c){ return /Pedido/i.test(c.textContent||''); }).sort(function(x,y){ return (y.textContent||'').length-(x.textContent||'').length; })[0];
       if(!target) target=a.closest('td')||a.parentNode;
