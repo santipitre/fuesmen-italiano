@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.5
+// @version      7.6
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote).
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -970,6 +970,14 @@
   var ST_JUST_DONE=null;        // id recien marcado en ESTA carga (evita repicarlo antes de que Supabase confirme)
   function sinturnoWorker(){
     if(ST_SEARCHING || ST_BUSY) return;
+    // FUESMEN carga la pagina con 8 sub-frames vacios (chat, notificaciones,
+    // syngovia, etc.) y Tampermonkey inyecta el userscript en TODOS. El form de
+    // busqueda y el contador "X TURNOS" viven SOLO en el documento principal.
+    // sessionStorage (fm_st_cur) se comparte entre frames del mismo origen: sin
+    // este guard, un frame vacio gana la carrera, no encuentra el contador y
+    // marca "error" borrando fm_st_cur antes de que el frame real lea el
+    // resultado. => Solo procesa el frame que realmente tiene el formulario.
+    if(!document.getElementById('_DOCUMENTOPERSONA')) return;
     ST_BUSY=true;
     var cur=sessionStorage.getItem('fm_st_cur');
     sbStFetchMine(function(jobs){
