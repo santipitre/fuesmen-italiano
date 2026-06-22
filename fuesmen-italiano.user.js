@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.6
-// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote).
+// @version      7.7
+// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio.
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @match        http://hitalianomza.no-ip.org:9000/*
@@ -78,6 +78,22 @@
   function sbGetSession(){ try { return JSON.parse(GM_getValue('fuesmen_session','null')); } catch(e){ return null; } }
   function sbSetSession(s){ try { GM_setValue('fuesmen_session', JSON.stringify(s)); } catch(e){} }
   function sbClearSession(){ try { GM_deleteValue('fuesmen_session'); } catch(e){} }
+  // ---- Cache local de la worklist (pintado instantaneo en cada recarga) ----
+  var WL_HARD_MS = 24*60*60*1000; // mas vieja que esto: ignorar y esperar la red
+  function wlCacheGet(){ try{ var o=JSON.parse(GM_getValue('fuesmen_wl_cache','null')); if(!o||!o.list||!o.list.length) return null; if((Date.now()-(o.t||0))>WL_HARD_MS) return null; return o; }catch(e){ return null; } }
+  function wlCacheSet(list,sig){ try{ GM_setValue('fuesmen_wl_cache', JSON.stringify({t:Date.now(),sig:sig,list:list})); }catch(e){} }
+  function wlSig(list){ var s=0; for(var i=0;i<list.length;i++){ var w=list[i]; var str=(w.TurnoN||'')+'|'+(w.DNI||''); for(var k=0;k<str.length;k++){ s=(s*31+str.charCodeAt(k))>>>0; } } return list.length+':'+s; }
+  // Quita todo lo inyectado por annotate/applyCargas/markRevisar para poder repintar limpio.
+  function clearAnnotations(){
+    ['.fm-panel','.fm-dni','.fm-dni-nomatch','.fm-dia','.fm-pedido','.fm-carga','.fm-rev-badge'].forEach(function(sel){
+      [].slice.call(document.querySelectorAll(sel)).forEach(function(n){ try{ n.remove(); }catch(e){} });
+    });
+    [].slice.call(document.querySelectorAll('tr')).forEach(function(r){
+      if(r.dataset && r.dataset.fmRev){ r.dataset.fmRev=''; try{ r.style.outline=''; }catch(e){}
+        [].slice.call(r.children).forEach(function(c){ if(c.tagName==='TD') c.style.backgroundColor=''; }); }
+    });
+    [].slice.call(document.querySelectorAll('[onclick*="informe("]')).forEach(function(a){ if(a.dataset) a.dataset.fmDone=''; });
+  }
   function sbEmail(){ var s=sbGetSession(); return s ? s.email : ''; }
   function sbReq(method, path, token, body, ok, fail){
     var headers = { 'apikey': SB_KEY, 'Content-Type':'application/json' };
@@ -1024,26 +1040,47 @@
     });
   }
 
+  var FM_SETUP_DONE=false;   // observer + timers escalonados: una sola vez por carga
+  var WL_PAINTED_SIG=null;   // firma de la worklist ya pintada en esta carga
   function startListB(){
     function go(list){
       if(!Array.isArray(list)) list=[list];
       if(queueActive()){ injectToggle(); setTimeout(processQueue, 200); return; }
       buildIndex(list); buildPedidoMap(list); buildSafeIndex(list);
       injectToggle(); annotate();
-      [120,350,800,1600,3000].forEach(function(ms){ setTimeout(annotate, ms); });
-      if(sessionStorage.getItem('fuesmen_justsaved')==='1'){ sessionStorage.removeItem('fuesmen_justsaved'); [1000,2000].forEach(function(ms){ setTimeout(nextPendingGreen, ms); }); }
-      var t1; new MutationObserver(function(){ clearTimeout(t1); t1=setTimeout(annotate, 250); }).observe(document.body,{childList:true,subtree:true});
+      if(!FM_SETUP_DONE){
+        FM_SETUP_DONE=true;
+        [120,350,800,1600,3000].forEach(function(ms){ setTimeout(annotate, ms); });
+        if(sessionStorage.getItem('fuesmen_justsaved')==='1'){ sessionStorage.removeItem('fuesmen_justsaved'); [1000,2000].forEach(function(ms){ setTimeout(nextPendingGreen, ms); }); }
+        var t1; new MutationObserver(function(){ clearTimeout(t1); t1=setTimeout(annotate, 250); }).observe(document.body,{childList:true,subtree:true});
+      }
     }
     injectToggle();
     sbFetchUsuarios(function(){});
+
+    // 1) PINTAR YA desde cache (si hay): saca la latencia de red del camino critico.
+    var cached=wlCacheGet();
+    if(cached && cached.list && cached.list.length){
+      WL_PAINTED_SIG = cached.sig || wlSig(cached.list);
+      go(cached.list);
+      toast('Asistente activo · '+cached.list.length+' turnos · '+shortName(sbEmail()),'#0969da');
+    }
+
+    // 2) Refrescar en segundo plano; re-anotar SOLO si la worklist cambio.
     sbFetchWorklist(function(list){
-      if(!list){ toast('No pude leer la worklist. ¿Sesión vencida? Probá salir y entrar.','#d1242f'); return; }
+      if(!list){ if(!cached) toast('No pude leer la worklist. ¿Sesión vencida? Probá salir y entrar.','#d1242f'); return; }
+      var sig=wlSig(list);
+      wlCacheSet(list, sig);
+      if(WL_PAINTED_SIG===sig) return;                 // sin cambios: no re-pintar
+      if(WL_PAINTED_SIG!==null){ clearAnnotations(); toast('Worklist actualizada · '+list.length+' turnos','#1a7f37'); }
+      else { toast('Asistente activo · '+list.length+' turnos · '+shortName(sbEmail()),'#0969da'); }
+      WL_PAINTED_SIG=sig;
       go(list);
-      toast('Asistente activo · '+list.length+' turnos · '+shortName(sbEmail()),'#0969da');
     });
+
     sbFetchCargas(applyCargas);
     sbFetchRevisar(function(){ applyView(); });
-    setInterval(function(){ sbFetchCargas(applyCargas); sbFetchRevisar(function(){ applyView(); applyCargas(); }); }, 15000);
+    setInterval(function(){ sbFetchCargas(applyCargas); sbFetchRevisar(function(){ applyView(); applyCargas(); }); }, 30000)
   }
 
   function start(){
