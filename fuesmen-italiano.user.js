@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.10
-// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja().
+// @version      7.11
+// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote.
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @match        http://hitalianomza.no-ip.org:9000/*
@@ -1114,6 +1114,16 @@
     }
     injectToggle();
     if(anularActive()){ anularStopBtn(); setTimeout(anularProcess, 700); return; }
+    // Mantener la vista ARRIBA tras cada accion (el postback de GeneXus salta al fondo).
+    // Salvo en carga en lote (justsaved/cola), que scrollea al proximo pedido a proposito.
+    // Se cancela si el usuario empieza a scrollear (wheel/touch).
+    if(sessionStorage.getItem('fuesmen_justsaved')!=='1' && !queueActive()){
+      var fmKillTop=false;
+      var fmOnScroll=function(){ fmKillTop=true; window.removeEventListener('wheel',fmOnScroll); window.removeEventListener('touchmove',fmOnScroll); };
+      window.addEventListener('wheel',fmOnScroll,{passive:true});
+      window.addEventListener('touchmove',fmOnScroll,{passive:true});
+      [0,150,450,900].forEach(function(ms){ setTimeout(function(){ if(!fmKillTop){ try{ window.scrollTo(0,0); }catch(e){} } }, ms); });
+    }
     sbFetchUsuarios(function(){});
 
     // 1) PINTAR YA desde cache (si hay): saca la latencia de red del camino critico.
