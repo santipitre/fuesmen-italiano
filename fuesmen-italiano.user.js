@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.4
+// @version      7.5
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote).
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -981,7 +981,11 @@
         if(job && job.estado==='buscando'){
           var doc=document.getElementById('_DOCUMENTOPERSONA');
           var docVal=doc?onlyDigits(doc.value):'';
-          if(docVal===onlyDigits(job.dni)){
+          // FUESMEN NO devuelve el DNI en el campo tras la recarga (vuelve vacio).
+          // Por eso solo es "mismatch" real si el campo trae un valor NO vacio y distinto.
+          // Si esta vacio, confiamos en la recarga y leemos el contador: hisResultCount()
+          // ya valida que la pagina sea una grilla de resultados ("X TURNOS").
+          if(!docVal || docVal===onlyDigits(job.dni)){
             var res=hisResultCount();
             if(res.ok){ sbStSetEstado(cur, res.vacio?'vacio':'con_resultados', res.turnos+' turnos / '+(res.estudios==null?'?':res.estudios)+' estudios'); }
             else { sbStSetEstado(cur,'error','sin contador tras la recarga'); }
