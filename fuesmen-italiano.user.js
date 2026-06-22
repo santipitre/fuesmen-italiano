@@ -1080,7 +1080,7 @@
 
     sbFetchCargas(applyCargas);
     sbFetchRevisar(function(){ applyView(); });
-    setInterval(function(){ sbFetchCargas(applyCargas); sbFetchRevisar(function(){ applyView(); applyCargas(); }); }, 30000)
+    setInterval(function(){ sbFetchCargas(applyCargas); sbFetchRevisar(function(){ applyView(); applyCargas(); }); }, 30000);
   }
 
   function start(){
