@@ -1262,3 +1262,107 @@
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
 })();
+
+// >>> FM-REPORTE START (mÃ³dulo Reporte/Excel "A revisar")
+(function () {
+  'use strict';
+  if (window.__fmReporteInit) return; window.__fmReporteInit = true;
+
+  function clean(s){ return (s||'').replace(/ /g,' ').replace(/\s+/g,' ').trim(); }
+  function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function stamp(){ var d=new Date(),p=function(n){return(n<10?'0':'')+n;}; return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'_'+p(d.getHours())+p(d.getMinutes()); }
+
+  // ---- raspar la tabla "en proceso" (la de mÃ¡s filas) ----
+  function scrape(){
+    var t=null,max=0;
+    [].slice.call(document.querySelectorAll('table')).forEach(function(x){ if(x.rows.length>max){max=x.rows.length;t=x;} });
+    if(!t) return [];
+    var out=[];
+    for(var i=1;i<t.rows.length;i++){
+      var c=t.rows[i].cells; if(c.length<6) continue;
+      var paciente=c[1].innerText.trim(), prestador=c[2].innerText.trim(), detalle=c[3].innerText.trim(), accion=c[5].innerText.trim(), fecha=c[0].innerText.trim();
+      var pacLines=paciente.split('\n').map(function(s){return s.replace(/ /g,' ').trim();}).filter(Boolean);
+      var dm=(pacLines[0]||'').match(/^([A-Za-z]{2,4})\.?-?\s*([\d\.]+)/);
+      var docTipo=dm?dm[1].toUpperCase():'', doc=dm?dm[2].replace(/\./g,''):'';
+      var nombre='';
+      for(var k=1;k<pacLines.length;k++){ if(!/^(Ubicaci|Servicio|O\.S|N[Â°Âº]|Ambulatorio|Internado)/i.test(pacLines[k])){ nombre=pacLines[k]; break; } }
+      var ubic=(paciente.match(/Ubicaci[oÃ³]n:\s*([^\n]+)/i)||[])[1]||'';
+      var servicio=(paciente.match(/Servicio:\s*([^\n]+)/i)||[])[1]||'';
+      var os=(paciente.match(/O\.S\.?:\s*([^\n]+)/i)||[])[1]||'';
+      var tipo=ubic?'Internado':(/Ambulatorio/i.test(paciente)?'Ambulatorio':'');
+      var presName=(prestador.split('\n').map(clean).filter(Boolean)[0])||'';
+      var sinTurno=/sin turno/i.test(prestador), tram=/Tr[aÃ¡]mite incompleto/i.test(prestador);
+      var aseg=(prestador.match(/Aseguradora:\s*([^\n]+)/i)||[])[1]||'';
+      var turnos=[];
+      detalle.split('\n').forEach(function(ln){ var m=ln.match(/^Turno\s*(\d+)\s*-\s*(\d{4}-\d{2}-\d{2})\s*-\s*(.+)$/i); if(m) turnos.push({num:m[1],fecha:m[2],desc:clean(m[3])}); });
+      var codigos=[]; detalle.split('\n').forEach(function(ln){ var m=ln.trim().match(/^(\d-\d{6})\s+(.+)$/); if(m) codigos.push(m[1]+' '+clean(m[2])); });
+      var diag=(detalle.match(/Diagn[oÃ³]stico\s*\n\s*([^\n]+)/i)||[])[1]||''; if(/^Observaci/i.test(diag)) diag='';
+      var obs=(detalle.match(/Observaci[oÃ³]n:\s*([^\n]*)/i)||[])[1]||'';
+      var pm=accion.match(/Pedido N[Â°Âº]\s*(\d+)/i);
+      var fl=fecha.split('\n').map(clean).filter(Boolean);
+      out.push({pedidoNro:pm?pm[1]:'',docTipo:docTipo,doc:doc,nombre:clean(nombre),tipo:tipo,fecha:fl[0]||'',ubicacion:clean(ubic),servicio:clean(servicio),os:clean(os),aseguradora:clean(aseg),prestador:presName,estadoTurno:sinTurno?'SIN TURNO':(tram?'TrÃ¡mite incompleto':(turnos.length?'Turnos candidatos':'-')),nTurnos:turnos.length,turnos:turnos,codigos:codigos,diagnostico:clean(diag),observacion:clean(obs)});
+    }
+    return out;
+  }
+
+  // ---- construir el HTML del reporte ----
+  function buildHTML(P){
+    var nSin=P.filter(function(p){return p.estadoTurno==='SIN TURNO';}).length;
+    var nTra=P.filter(function(p){return p.estadoTurno==='TrÃ¡mite incompleto';}).length;
+    var nInt=P.filter(function(p){return p.tipo==='Internado';}).length;
+    var fechaGen=new Date().toLocaleString('es-AR');
+    function tc(p){ return !p.turnos.length?'<span class="badge sin">'+esc(p.estadoTurno)+'</span>':'<span class="badge tra">'+p.nTurnos+' turno(s)</span><ul class="tlist">'+p.turnos.map(function(t){return '<li><b>'+esc(t.num)+'</b> Â· '+esc(t.fecha)+'<br><span class="td">'+esc(t.desc)+'</span></li>';}).join('')+'</ul>'; }
+    var rh=P.map(function(p,i){
+      var ubic=p.tipo==='Internado'?(esc(p.ubicacion)+(p.servicio?' Â· '+esc(p.servicio):'')):'Ambulatorio';
+      var obra=[p.os,p.aseguradora].filter(Boolean).map(esc).join('<br>');
+      var est=p.codigos.map(esc).join('<br>');
+      return '<tr data-estado="'+esc(p.estadoTurno)+'" data-tipo="'+esc(p.tipo)+'"><td>'+(i+1)+'</td><td class="ped">'+esc(p.pedidoNro)+'</td><td class="dni">'+esc(p.docTipo)+' '+esc(p.doc)+'</td><td>'+esc(p.nombre)+'</td><td class="nw">'+esc(p.fecha)+'</td><td>'+ubic+'</td><td>'+obra+'</td><td>'+esc(p.prestador)+'</td><td>'+tc(p)+'</td><td>'+est+'</td><td>'+esc(p.diagnostico)+'</td><td>'+esc(p.observacion)+'</td></tr>';
+    }).join('');
+    var DATA=JSON.stringify(P).replace(/<\//g,'<\\/');
+    return '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+    +'<title>A revisar - Pedidos MÃ©dicos FUESMEN/Italiano - '+fechaGen+'</title>'
+    +'<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>'
+    +'<style>:root{--b:#b91c1c}*{box-sizing:border-box}body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0;color:#1f2937;background:#f3f4f6}header{background:var(--b);color:#fff;padding:14px 20px}header h1{margin:0;font-size:18px}header .sub{font-size:12px;opacity:.9;margin-top:3px}.bar{position:sticky;top:0;background:#fff;padding:10px 20px;border-bottom:1px solid #e5e7eb;display:flex;gap:10px;flex-wrap:wrap;align-items:center;z-index:5}.bar input,.bar select{padding:7px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px}.bar input{flex:1;min-width:220px}.btn{border:0;border-radius:6px;padding:8px 12px;font-weight:700;font-size:13px;cursor:pointer;color:#fff}.btn.x{background:#1f883d}.btn.c{background:#0969da}.stat{font-size:12px;background:#eef2ff;color:#3730a3;padding:5px 9px;border-radius:20px;font-weight:600}.stat.r{background:#fee2e2;color:#991b1b}.stat.y{background:#fef9c3;color:#854d0e}.wrap{overflow:auto;padding:0 12px 40px}table{border-collapse:collapse;width:100%;background:#fff;font-size:12px}th,td{border:1px solid #e5e7eb;padding:6px 8px;vertical-align:top;text-align:left}th{background:#374151;color:#fff;position:sticky;top:58px;z-index:4;font-size:11px;white-space:nowrap}tr:nth-child(even){background:#fafafa}td.dni{font-weight:700;white-space:nowrap;color:#0f766e}td.ped{font-weight:600}td.nw{white-space:nowrap}.badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700}.badge.sin{background:#fee2e2;color:#991b1b}.badge.tra{background:#fef9c3;color:#854d0e}ul.tlist{margin:5px 0 0;padding-left:14px}ul.tlist li{margin-bottom:4px}.td{color:#6b7280;font-size:11px}.hide{display:none}@media print{.bar{display:none}th{position:static}}</style></head><body>'
+    +'<header><h1>Pedidos MÃ©dicos â€” PestaÃ±a "A revisar"</h1><div class="sub">Hospital Italiano Mza. / FUESMEN-FINAMED Â· Generado: '+fechaGen+' Â· Total: '+P.length+' pedidos</div></header>'
+    +'<div class="bar"><input id="q" placeholder="Buscar por DNI, nombre, prestador, estudio, NÂ° turno, pedido..."><select id="fEstado"><option value="">Todos los estados</option><option>SIN TURNO</option><option>TrÃ¡mite incompleto</option></select><select id="fTipo"><option value="">Amb. + Internado</option><option>Ambulatorio</option><option>Internado</option></select>'
+    +'<button class="btn x" id="bx">â¬‡ Exportar Excel</button><button class="btn c" id="bc">â¬‡ CSV</button>'
+    +'<span class="stat">Total: '+P.length+'</span><span class="stat r">Sin turno: '+nSin+'</span><span class="stat y">TrÃ¡mite incompleto: '+nTra+'</span><span class="stat">Internados: '+nInt+'</span><span class="stat" id="shown"></span></div>'
+    +'<div class="wrap"><table id="t"><thead><tr><th>#</th><th>NÂ° Pedido</th><th>Documento</th><th>Paciente</th><th>Fecha y hora</th><th>Tipo / UbicaciÃ³n</th><th>O.S. / Aseguradora</th><th>Prestador</th><th>Turno(s)</th><th>Estudios solicitados</th><th>DiagnÃ³stico</th><th>ObservaciÃ³n</th></tr></thead><tbody>'+rh+'</tbody></table></div>'
+    +'<script>var DATA='+DATA+';'
+    +'var q=document.getElementById("q"),fe=document.getElementById("fEstado"),ft=document.getElementById("fTipo"),sh=document.getElementById("shown");'
+    +'var rows=[].slice.call(document.querySelectorAll("#t tbody tr"));'
+    +'function flt(){var s=q.value.toLowerCase(),e=fe.value,tp=ft.value,n=0;rows.forEach(function(r){var ok=(!s||r.textContent.toLowerCase().indexOf(s)>=0)&&(!e||r.getAttribute("data-estado")===e)&&(!tp||r.getAttribute("data-tipo")===tp);r.className=ok?"":"hide";if(ok)n++;});sh.textContent="Mostrando: "+n;}'
+    +'q.oninput=flt;fe.onchange=flt;ft.onchange=flt;flt();'
+    +'function stamp(){var d=new Date(),p=function(n){return(n<10?"0":"")+n;};return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"_"+p(d.getHours())+p(d.getMinutes());}'
+    +'function flat(){var out=[];DATA.forEach(function(p,i){var base={"#":i+1,"NÂ° Pedido":p.pedidoNro,"Doc":p.docTipo,"Documento":p.doc,"Paciente":p.nombre,"Tipo":p.tipo||"","UbicaciÃ³n":p.ubicacion||"","Servicio":p.servicio||"","O.S.":p.os||"","Aseguradora":p.aseguradora||"","Prestador":p.prestador,"Fecha y hora":p.fecha,"Estado turno":p.estadoTurno,"Estudios solicitados":(p.codigos||[]).join(" | "),"DiagnÃ³stico":p.diagnostico||"","ObservaciÃ³n":p.observacion||""};'
+    +'if(p.turnos&&p.turnos.length){p.turnos.forEach(function(t){var r={};for(var kk in base)r[kk]=base[kk];r["Turno NÂ°"]=t.num;r["Turno Fecha"]=t.fecha;r["Turno Estudio"]=t.desc;out.push(r);});}else{var r2={};for(var kk2 in base)r2[kk2]=base[kk2];r2["Turno NÂ°"]="";r2["Turno Fecha"]="";r2["Turno Estudio"]="";out.push(r2);}});return out;}'
+    +'var COLS=["#","NÂ° Pedido","Doc","Documento","Paciente","Tipo","UbicaciÃ³n","Servicio","O.S.","Aseguradora","Prestador","Fecha y hora","Estado turno","Turno NÂ°","Turno Fecha","Turno Estudio","Estudios solicitados","DiagnÃ³stico","ObservaciÃ³n"];'
+    +'document.getElementById("bx").onclick=function(){if(typeof XLSX==="undefined"){alert("No se pudo cargar la librerÃ­a de Excel (sin internet). UsÃ¡ el botÃ³n CSV.");return;}var rs=flat().map(function(r){var o={};COLS.forEach(function(c){o[c]=r[c];});return o;});var ws=XLSX.utils.json_to_sheet(rs,{header:COLS});var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"A revisar");XLSX.writeFile(wb,"A_revisar_FUESMEN_"+stamp()+".xlsx");};'
+    +'document.getElementById("bc").onclick=function(){var rs=flat();var csv=COLS.join(";")+"\\n"+rs.map(function(r){return COLS.map(function(c){var v=r[c]==null?"":String(r[c]);return \'"\'+v.replace(/"/g,\'""\')+\'"\';}).join(";");}).join("\\n");var blob=new Blob(["\\ufeff"+csv],{type:"text/csv;charset=utf-8"});var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="A_revisar_FUESMEN_"+stamp()+".csv";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1500);};'
+    +'<\/script></body></html>';
+  }
+
+  function openReport(){
+    var P=scrape();
+    if(!P.length){ alert('No se encontraron pedidos en la tabla "En proceso".'); return; }
+    var w=window.open('','_blank');
+    if(!w){ alert('El navegador bloqueÃ³ la ventana emergente. PermitÃ­ pop-ups para este sitio y volvÃ© a intentar.'); return; }
+    w.document.open(); w.document.write(buildHTML(P)); w.document.close();
+  }
+
+  // ---- insertar el botÃ³n en la barra #fm-bar (idempotente) ----
+  function injectBtn(){
+    var bar=document.getElementById('fm-bar');
+    if(!bar || document.getElementById('fm-bRep')) return;
+    var b=document.createElement('button'); b.id='fm-bRep';
+    b.textContent='ðŸ“‹ Reporte/Excel';
+    b.style.cssText='font:700 13px Segoe UI;color:#fff;border:0;padding:9px 14px;border-radius:8px;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.3);background:#1f883d';
+    b.title='Abre el reporte completo de "A revisar" con filtros y exportaciÃ³n a Excel/CSV';
+    b.onclick=openReport;
+    bar.appendChild(b);
+  }
+  setInterval(injectBtn, 1500);
+  injectBtn();
+})();
+// <<< FM-REPORTE END
+
