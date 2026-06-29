@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.18
+// @version      7.19
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote.
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -80,6 +80,7 @@
   function sbClearSession(){ try { GM_deleteValue('fuesmen_session'); } catch(e){} }
   // ---- Cache local de la worklist (pintado instantaneo en cada recarga) ----
   var WL_HARD_MS = 24*60*60*1000; // mas vieja que esto: ignorar y esperar la red
+  var WL_SOFT_MS = 8*60*1000;     // dentro de esta ventana: usar cache, NO ir a la red (ahorra egress)
   function wlCacheGet(){ try{ var o=JSON.parse(GM_getValue('fuesmen_wl_cache','null')); if(!o||!o.list||!o.list.length) return null; if((Date.now()-(o.t||0))>WL_HARD_MS) return null; return o; }catch(e){ return null; } }
   function wlCacheSet(list,sig){ try{ GM_setValue('fuesmen_wl_cache', JSON.stringify({t:Date.now(),sig:sig,list:list})); }catch(e){} }
   function wlSig(list){ var s=0; for(var i=0;i<list.length;i++){ var w=list[i]; var str=(w.TurnoN||'')+'|'+(w.DNI||''); for(var k=0;k<str.length;k++){ s=(s*31+str.charCodeAt(k))>>>0; } } return list.length+':'+s; }
@@ -121,9 +122,13 @@
   function sbFetchWorklist(cb){
     sbWithToken(function(t){ if(!t){ cb(null); return; }
       var out=[], page=0, size=1000;
+      // Filtro por fecha: solo turnos de los ultimos 30 dias (la columna fecha es
+      // 'YYYY-MM-DD' segun Parse-SystemA.ps1/ConvertTo-FechaStr, ordenable). Reduce egress.
+      var _d=new Date(); _d.setDate(_d.getDate()-30);
+      var _fechaDesde=_d.toISOString().slice(0,10);   // YYYY-MM-DD
       function next(){
         var from=page*size, to=from+size-1;
-        GM_xmlhttpRequest({ method:'GET', url:SB_URL+'/rest/v1/fuesmen_worklist?select=turno_n,pedido_med,dni,practicas,fecha,alerta,aseguradora,cuenta',
+        GM_xmlhttpRequest({ method:'GET', url:SB_URL+'/rest/v1/fuesmen_worklist?select=turno_n,pedido_med,dni,practicas,fecha,alerta,aseguradora,cuenta&fecha=gte.'+_fechaDesde,
           headers:{ 'apikey':SB_KEY, 'Authorization':'Bearer '+t, 'Range-Unit':'items', 'Range':from+'-'+to },
           onload:function(r){ var d=[]; try{ d=JSON.parse(r.responseText)||[]; }catch(e){}
             out=out.concat(d);
@@ -134,10 +139,19 @@
     });
   }
   var USERNAMES={};
+  var USR_TTL_MS = 24*60*60*1000;   // cache de usuarios por 1 dia (ahorra egress)
   function sbFetchUsuarios(cb){
+    try{
+      var co=JSON.parse(GM_getValue('fuesmen_usuarios_cache','null'));
+      if(co && co.map && (Date.now()-(co.t||0)) < USR_TTL_MS){
+        USERNAMES=co.map; cb&&cb(); return;
+      }
+    }catch(e){}
     sbWithToken(function(t){ if(!t){ cb&&cb(); return; }
       sbReq('GET','/rest/v1/fuesmen_usuarios?select=email,nombre', t, null,
-        function(d){ (d||[]).forEach(function(u){ USERNAMES[u.email]=u.nombre; }); cb&&cb(); },
+        function(d){ (d||[]).forEach(function(u){ USERNAMES[u.email]=u.nombre; });
+          try{ GM_setValue('fuesmen_usuarios_cache', JSON.stringify({t:Date.now(), map:USERNAMES})); }catch(e){}
+          cb&&cb(); },
         function(){ cb&&cb(); }); });
   }
   function shortName(email){ return USERNAMES[email] || (email||'').split('@')[0] || 'otro'; }
@@ -1135,16 +1149,19 @@
     }
 
     // 2) Refrescar en segundo plano; re-anotar SOLO si la worklist cambio.
-    sbFetchWorklist(function(list){
-      if(!list){ if(!cached) toast('No pude leer la worklist. ¿Sesión vencida? Probá salir y entrar.','#d1242f'); return; }
-      var sig=wlSig(list);
-      wlCacheSet(list, sig);
-      if(WL_PAINTED_SIG===sig) return;                 // sin cambios: no re-pintar
-      if(WL_PAINTED_SIG!==null){ clearAnnotations(); toast('Worklist actualizada · '+list.length+' turnos','#1a7f37'); }
-      else { toast('Asistente activo · '+list.length+' turnos · '+shortName(sbEmail()),'#0969da'); }
-      WL_PAINTED_SIG=sig;
-      go(list);
-    });
+    var fresh = cached && (Date.now()-(cached.t||0)) < WL_SOFT_MS;
+    if(!fresh){
+      sbFetchWorklist(function(list){
+        if(!list){ if(!cached) toast('No pude leer la worklist. ¿Sesión vencida? Probá salir y entrar.','#d1242f'); return; }
+        var sig=wlSig(list);
+        wlCacheSet(list, sig);
+        if(WL_PAINTED_SIG===sig) return;                 // sin cambios: no re-pintar
+        if(WL_PAINTED_SIG!==null){ clearAnnotations(); toast('Worklist actualizada · '+list.length+' turnos','#1a7f37'); }
+        else { toast('Asistente activo · '+list.length+' turnos · '+shortName(sbEmail()),'#0969da'); }
+        WL_PAINTED_SIG=sig;
+        go(list);
+      });
+    }
 
     sbFetchCargas(applyCargas);
     sbFetchRevisar(function(){ applyView(); });
