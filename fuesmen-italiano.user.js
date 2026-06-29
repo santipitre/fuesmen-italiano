@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.19
+// @version      7.20
 // @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote.
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
@@ -1183,7 +1183,8 @@
       }
       window.addEventListener('hashchange', runHis);
       runHis();
-      sbFetchWorklist(function(l){ if(l){ buildPedidoMap(l); annotateHisGrid(); } });
+      // v7.20: gate TTL tambien en host FUESMEN (antes re-bajaba la worklist en cada postback -> egress)
+      (function(){ var c=wlCacheGet(); if(c&&c.list&&c.list.length){ buildPedidoMap(c.list); annotateHisGrid(); } var fr=c&&(Date.now()-(c.t||0))<WL_SOFT_MS; if(!fr){ sbFetchWorklist(function(l){ if(l){ wlCacheSet(l,wlSig(l)); buildPedidoMap(l); annotateHisGrid(); } }); } })();
       [500,1300,2600].forEach(function(ms){ setTimeout(annotateHisGrid, ms); });
       // v7: loop SIN TURNO (se auto-encadena; el interval solo lo arranca si aparecen jobs)
       sinturnoWorker();
