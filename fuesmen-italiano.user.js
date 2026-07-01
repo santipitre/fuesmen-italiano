@@ -1,8 +1,8 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.21
-// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote.
+// @version      7.22
+// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el NÂ° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "NÂ° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote.
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @match        http://hitalianomza.no-ip.org:9000/*
@@ -32,11 +32,11 @@
     if(document.getElementById('fm-upd')) return;
     var bar=document.createElement('div'); bar.id='fm-upd';
     bar.style.cssText='position:fixed;top:0;left:0;right:0;z-index:100002;background:#d1242f;color:#fff;font:800 15px Segoe UI,sans-serif;padding:12px 16px;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;box-shadow:0 2px 12px rgba(0,0,0,.4)';
-    var tx=document.createElement('span'); tx.textContent='⚠ Asistente FUESMEN: hay una versión nueva (v'+ver+'). Tenés que actualizar.';
+    var tx=document.createElement('span'); tx.textContent='âš  Asistente FUESMEN: hay una versiÃ³n nueva (v'+ver+'). TenÃ©s que actualizar.';
     var b=document.createElement('button'); b.textContent='ACTUALIZAR AHORA';
     b.style.cssText='font:800 14px Segoe UI;color:#d1242f;background:#fff;border:0;padding:8px 18px;border-radius:8px;cursor:pointer';
     b.onclick=openUpdate;
-    var hint=document.createElement('span'); hint.style.cssText='font:600 12px Segoe UI;opacity:.92'; hint.textContent='(Apretá Actualizar, confirmá en Tampermonkey y recargá la página)';
+    var hint=document.createElement('span'); hint.style.cssText='font:600 12px Segoe UI;opacity:.92'; hint.textContent='(ApretÃ¡ Actualizar, confirmÃ¡ en Tampermonkey y recargÃ¡ la pÃ¡gina)';
     bar.appendChild(tx); bar.appendChild(b); bar.appendChild(hint);
     document.body.appendChild(bar);
     setInterval(function(){ if(!document.getElementById('fm-upd')) document.body.appendChild(bar); }, 5000);
@@ -46,7 +46,7 @@
     var box=ov.firstChild; if(!box || box.querySelector('.fm-upd-note')) return;
     var note=document.createElement('div'); note.className='fm-upd-note';
     note.style.cssText='background:#fff0f0;border:2px solid #d1242f;border-radius:8px;padding:10px;margin-bottom:12px';
-    var t=document.createElement('div'); t.style.cssText='font:800 13px Segoe UI;color:#d1242f;margin-bottom:6px'; t.textContent='⚠ Hay una versión nueva (v'+ver+'). Actualizá antes de entrar.';
+    var t=document.createElement('div'); t.style.cssText='font:800 13px Segoe UI;color:#d1242f;margin-bottom:6px'; t.textContent='âš  Hay una versiÃ³n nueva (v'+ver+'). ActualizÃ¡ antes de entrar.';
     var b=document.createElement('button'); b.textContent='Actualizar ahora'; b.style.cssText='width:100%;font:700 13px Segoe UI;color:#fff;background:#d1242f;border:0;padding:9px;border-radius:8px;cursor:pointer'; b.onclick=openUpdate;
     note.appendChild(t); note.appendChild(b); box.insertBefore(note, box.firstChild);
   }
@@ -67,7 +67,7 @@
     RMN:'RESONANCIA', RM:'RESONANCIA', RNM:'RESONANCIA', TX:'TORAX' };
 
   // ---- utilidades ----
-  function norm(s){ return (s||'').toString().toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
+  function norm(s){ return (s||'').toString().toUpperCase().normalize('NFD').replace(/[Ì€-Í¯]/g,'').replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
   function tokens(s){ return norm(s).split(' ').map(function(t){ return SYN[t]||t; }).filter(function(t){ return t.length>=3 && STOP.indexOf(t)<0 && !/^[0-9]+$/.test(t); }); }
   function score(a,b){ var A=tokens(a),B=tokens(b); if(!A.length||!B.length) return 0; var sa={}; A.forEach(function(t){sa[t]=1;}); var sb={}; B.forEach(function(t){sb[t]=1;}); var i=0; Object.keys(sa).forEach(function(t){ if(sb[t]) i++; }); var u={}; A.concat(B).forEach(function(t){u[t]=1;}); return i/Object.keys(u).length; }
   function onlyDigits(s){ return (s||'').replace(/[^0-9]/g,''); }
@@ -218,7 +218,7 @@
     if(g){ g.style.cssText+=';outline:3px solid #2ea043;box-shadow:0 0 0 4px #2ea04344'; g.scrollIntoView({block:'center'}); }
     if(g && auto){
       sessionStorage.setItem('fuesmen_justsaved','1');
-      toast('N° '+turno+' pegado'+(meta?(' - '+meta):'')+'. Guardando…','#2ea043');
+      toast('NÂ° '+turno+' pegado'+(meta?(' - '+meta):'')+'. Guardandoâ€¦','#2ea043');
       setTimeout(function(){ g.click(); try{ if(g.form && g.form.requestSubmit) g.form.requestSubmit(g); }catch(e){} if(pid){ cargaUpsert(pid, tn, 'cargado'); sessionStorage.removeItem('fuesmen_pedidoid'); sessionStorage.removeItem('fuesmen_turno_n'); } }, 300);
     } else {
       if(pid){ cargaUpsert(pid, tn, 'cargado'); sessionStorage.removeItem('fuesmen_pedidoid'); sessionStorage.removeItem('fuesmen_turno_n'); }
@@ -290,9 +290,37 @@
     sessionStorage.setItem('fuesmen_autosave','1');
     sessionStorage.setItem('fuesmen_pedidoid', info.pedidoId||'');
     sessionStorage.setItem('fuesmen_turno_n', String(turno));
-    info.anchor.click();
+    clickInforme(info);
   }
 
+  // v7.22: el "Cargar" a veces no disparaba a la primera. Se clickeaba el ancla capturada
+  // en annotate(), que queda detachada del DOM cuando la worklist se repinta (cache v7.7)
+  // o tras un postback parcial de GeneXus. Fix: re-resolver el ancla VIVA por pedidoId al
+  // momento del click y reintentar SOLO si la pagina no navego (si navego, el timeout muere
+  // en el unload => sin doble submit).
+  function clickInforme(info, attempt){
+    attempt = attempt || 0;
+    var a = null;
+    if(info && info.pedidoId){
+      var all = document.querySelectorAll('[onclick*="informe('+info.pedidoId+')"]');
+      for(var i=0;i<all.length;i++){ if(all[i].offsetParent!==null){ a=all[i]; break; } }
+      if(!a && all[0]) a=all[0];
+    }
+    if((!a || !document.body.contains(a)) && info) a=info.anchor;
+    if(!a || !document.body.contains(a)){
+      toast('No encontre el pedido en la lista. Recarga (F5) y proba de nuevo.','#d1242f');
+      return;
+    }
+    a.click();
+    if(info && info.pedidoId && attempt < 2){
+      setTimeout(function(){
+        if(!document.querySelector('#numero_informe') &&
+           document.querySelector('[onclick*="informe('+info.pedidoId+')"]')){
+          clickInforme(info, attempt+1);
+        }
+      }, 1500);
+    }
+  }
   // ===== CARGA EN LOTE de casos SEGUROS =====
   var SAFE_MAP={};
   function safeList(){ return Object.keys(SAFE_MAP).map(function(k){ return SAFE_MAP[k]; }); }
@@ -327,9 +355,9 @@
   function queueActive(){ try{ return localStorage.getItem('fuesmen_queue_active')==='1'; }catch(e){ return false; } }
   function updateSafeBtn(){
     var b=document.getElementById('fm-b4'); if(!b) return;
-    if(queueActive()){ b.textContent='⛔ Detener carga ('+queueGet().length+')'; b.style.background='#d1242f'; b.disabled=false; b.style.opacity='1'; return; }
+    if(queueActive()){ b.textContent='â›” Detener carga ('+queueGet().length+')'; b.style.background='#d1242f'; b.disabled=false; b.style.opacity='1'; return; }
     var n=safeList().length;
-    b.textContent='✅ Cargar seguros ('+n+')';
+    b.textContent='âœ… Cargar seguros ('+n+')';
     b.style.background=n?'#1a7f37':'#6e7781'; b.disabled=!n; b.style.opacity=n?'1':'.6';
   }
   function showSafeModal(){
@@ -342,14 +370,14 @@
     var box=document.createElement('div');
     box.style.cssText='background:#fff;max-width:580px;width:92%;max-height:82vh;display:flex;flex-direction:column;border-radius:12px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.4)';
     var head=document.createElement('div'); head.style.cssText='background:#1a7f37;color:#fff;padding:12px 16px;font:800 15px Segoe UI;display:flex;justify-content:space-between;align-items:center';
-    var ht=document.createElement('span'); ht.textContent='✅ Casos seguros para cargar ('+list.length+')'; head.appendChild(ht);
-    var x=document.createElement('button'); x.textContent='✕'; x.style.cssText='background:transparent;border:0;color:#fff;font-size:18px;cursor:pointer'; x.onclick=function(){ ov.remove(); }; head.appendChild(x);
+    var ht=document.createElement('span'); ht.textContent='âœ… Casos seguros para cargar ('+list.length+')'; head.appendChild(ht);
+    var x=document.createElement('button'); x.textContent='âœ•'; x.style.cssText='background:transparent;border:0;color:#fff;font-size:18px;cursor:pointer'; x.onclick=function(){ ov.remove(); }; head.appendChild(x);
     var body=document.createElement('div'); body.style.cssText='overflow:auto;padding:10px 16px;flex:1';
     if(!list.length){ body.innerHTML='<div style="color:#57606a;font:500 13px Segoe UI;padding:10px">No hay casos seguros disponibles (libres, tramite completo, turno unico).</div>'; }
     else{
       var tbl=document.createElement('table'); tbl.style.cssText='width:100%;border-collapse:collapse;font:13px Segoe UI';
       var hr=document.createElement('tr'); hr.style.cssText='text-align:left;color:#57606a;border-bottom:2px solid #eee';
-      hr.innerHTML='<th style="padding:4px">Fecha</th><th>DNI</th><th>Turno</th><th>Pedido N°</th>'; tbl.appendChild(hr);
+      hr.innerHTML='<th style="padding:4px">Fecha</th><th>DNI</th><th>Turno</th><th>Pedido NÂ°</th>'; tbl.appendChild(hr);
       list.forEach(function(s){ var tr=document.createElement('tr'); tr.style.cssText='border-bottom:1px solid #f0f0f0';
         tr.innerHTML='<td style="padding:4px;color:#57606a">'+(s.fecha||'')+'</td><td>'+s.dni+'</td><td style="color:#0a5c28;font-weight:800">'+s.turno+'</td><td style="color:#1f6feb;font-weight:700">'+s.pedido+'</td>';
         tbl.appendChild(tr); });
@@ -357,10 +385,10 @@
     }
     var foot=document.createElement('div'); foot.style.cssText='padding:12px 16px;border-top:1px solid #eee;display:flex;gap:10px;justify-content:flex-end;align-items:center';
     var warn=document.createElement('span'); warn.style.cssText='flex:1;font:600 11px Segoe UI;color:#9a6700'; warn.textContent='Carga y Guarda cada uno en secuencia.';
-    var test=document.createElement('button'); test.textContent='🔍 Probar 3';
+    var test=document.createElement('button'); test.textContent='ðŸ” Probar 3';
     test.style.cssText='font:800 13px Segoe UI;color:#1a7f37;background:#eafbf0;border:2px solid #1a7f37;padding:8px 13px;border-radius:9px;cursor:'+(list.length?'pointer':'default'); test.disabled=!list.length; if(!list.length) test.style.opacity='.6';
     test.onclick=function(){ ov.remove(); startBatch(list.slice(0,3)); };
-    var go2=document.createElement('button'); go2.textContent='⚡ Cargar todos ('+list.length+')';
+    var go2=document.createElement('button'); go2.textContent='âš¡ Cargar todos ('+list.length+')';
     go2.style.cssText='font:800 14px Segoe UI;color:#fff;background:'+(list.length?'#1a7f37':'#6e7781')+';border:0;padding:10px 18px;border-radius:9px;cursor:'+(list.length?'pointer':'default'); go2.disabled=!list.length;
     go2.onclick=function(){ ov.remove(); startBatch(list); };
     foot.appendChild(warn); foot.appendChild(test); foot.appendChild(go2);
@@ -371,14 +399,14 @@
     var q=list.map(function(s){ return {pedidoId:s.pedidoId, turno:s.turno, meta:s.meta}; });
     try{ localStorage.setItem('fuesmen_queue', JSON.stringify(q)); localStorage.setItem('fuesmen_queue_active','1'); }catch(e){}
     updateSafeBtn();
-    toast('Cargando '+q.length+' casos seguros…','#1a7f37');
+    toast('Cargando '+q.length+' casos segurosâ€¦','#1a7f37');
     processQueue();
   }
   var QUEUE_TRIES=0;
   function processQueue(){
     if(!queueActive()) return;
     var q=queueGet();
-    if(!q.length){ try{ localStorage.removeItem('fuesmen_queue_active'); }catch(e){} updateSafeBtn(); toast('✅ Carga en lote terminada.','#1a7f37'); return; }
+    if(!q.length){ try{ localStorage.removeItem('fuesmen_queue_active'); }catch(e){} updateSafeBtn(); toast('âœ… Carga en lote terminada.','#1a7f37'); return; }
     var item=q[0];
     var a=document.querySelector('[onclick*="informe('+item.pedidoId+')"]');
     if(!a){ if(QUEUE_TRIES++ < 20){ setTimeout(processQueue, 500); return; } q.shift(); try{ localStorage.setItem('fuesmen_queue', JSON.stringify(q)); }catch(e){} QUEUE_TRIES=0; setTimeout(processQueue, 300); return; }
@@ -390,7 +418,7 @@
     sessionStorage.setItem('fuesmen_autosave','1');
     sessionStorage.setItem('fuesmen_pedidoid', item.pedidoId||'');
     sessionStorage.setItem('fuesmen_turno_n', String(item.turno));
-    toast('Lote: turno '+item.turno+' ('+q.length+' restantes)…','#1f6feb');
+    toast('Lote: turno '+item.turno+' ('+q.length+' restantes)â€¦','#1f6feb');
     a.click();
   }
 
@@ -449,7 +477,7 @@
       var cell=row.querySelector('td')||row;
       if(!cell.querySelector('.fm-rev-badge')){
         var b=document.createElement('span'); b.className='fm-rev-badge';
-        b.textContent='📌 A REVISAR';
+        b.textContent='ðŸ“Œ A REVISAR';
         b.style.cssText='display:inline-block;margin-top:4px;font:800 11px Segoe UI;color:#fff;background:#e0a106;padding:2px 8px;border-radius:6px';
         cell.appendChild(b);
       }
@@ -488,21 +516,21 @@
       var prev=row.querySelector('.fm-carga'); if(prev) prev.remove();
       var btns=[].slice.call(row.querySelectorAll('.fm-panel button')).filter(function(b){ return /Cargar/i.test(b.textContent||''); });
       var st=cargaEstado(id);
-      if(st.k==='done'){ DONE[id]=1; addCargaBadge(row,'✓ Cargado'+(st.email?(' · '+shortName(st.email)):''),'#1a7f37'); btns.forEach(function(b){ b.disabled=true; b.style.opacity='.45'; }); }
-      else if(st.k==='locked'){ addCargaBadge(row,'🔒 En curso · '+shortName(st.email),'#9a6700'); btns.forEach(function(b){ b.disabled=true; b.style.opacity='.45'; b.title='Lo esta cargando '+shortName(st.email); }); }
-      else if(st.k==='mine'){ addCargaBadge(row,'✋ Lo tenés vos','#1f6feb'); }
+      if(st.k==='done'){ DONE[id]=1; addCargaBadge(row,'âœ“ Cargado'+(st.email?(' Â· '+shortName(st.email)):''),'#1a7f37'); btns.forEach(function(b){ b.disabled=true; b.style.opacity='.45'; }); }
+      else if(st.k==='locked'){ addCargaBadge(row,'ðŸ”’ En curso Â· '+shortName(st.email),'#9a6700'); btns.forEach(function(b){ b.disabled=true; b.style.opacity='.45'; b.title='Lo esta cargando '+shortName(st.email); }); }
+      else if(st.k==='mine'){ addCargaBadge(row,'âœ‹ Lo tenÃ©s vos','#1f6feb'); }
     });
     updateSafeBtn();
   }
   function updateToggleLabels(){
     var b1=document.getElementById('fm-b1'), b2=document.getElementById('fm-b2'), b5=document.getElementById('fm-b5');
-    if(b1){ b1.textContent=soloMatch?'👁 Ver TODOS':'👁 Solo los que tienen turno'; b1.style.background=soloMatch?'#2ea043':'#1f6feb'; }
-    if(b2){ b2.textContent=(viewRevisar?'↩ Volver a la lista':'📌 A revisar')+' ('+revCount()+')'; b2.style.background=viewRevisar?'#9a6700':'#444c56'; }
+    if(b1){ b1.textContent=soloMatch?'ðŸ‘ Ver TODOS':'ðŸ‘ Solo los que tienen turno'; b1.style.background=soloMatch?'#2ea043':'#1f6feb'; }
+    if(b2){ b2.textContent=(viewRevisar?'â†© Volver a la lista':'ðŸ“Œ A revisar')+' ('+revCount()+')'; b2.style.background=viewRevisar?'#9a6700':'#444c56'; }
     if(b5){ var hc=[].slice.call(document.querySelectorAll('[onclick*="informe("]')).filter(function(a){ var r=pedidoRow(a); return r && r.offsetParent!==null && /HAREFIELD/i.test(r.textContent||''); }).length;
-      b5.textContent=(viewHarefield?'↩ Ver todas':'🏥 HAREFIELD')+' ('+hc+')'; b5.style.background=viewHarefield?'#8250df':'#6f42c1'; }
+      b5.textContent=(viewHarefield?'â†© Ver todas':'ðŸ¥ HAREFIELD')+' ('+hc+')'; b5.style.background=viewHarefield?'#8250df':'#6f42c1'; }
     var b6=document.getElementById('fm-b6');
     if(b6){ var sc=[].slice.call(document.querySelectorAll('[onclick*="informe("]')).filter(function(a){ var r=pedidoRow(a); return r && (r.querySelector('.fm-dni-nomatch')||r.querySelector('.fm-panel.fm-noturno')); }).length;
-      b6.textContent=(viewSinTurno?'↩ Ver todas':'🚫 SIN TURNO')+' ('+sc+')'; b6.style.background=viewSinTurno?'#a40e26':'#d1242f'; }
+      b6.textContent=(viewSinTurno?'â†© Ver todas':'ðŸš« SIN TURNO')+' ('+sc+')'; b6.style.background=viewSinTurno?'#a40e26':'#d1242f'; }
   }
   function injectToggle(){
     if(document.getElementById('fm-bar')) return;
@@ -521,11 +549,11 @@
     b1.onclick=function(){ viewSinTurno=false; viewRevisar=false; viewHarefield=false; try{localStorage.setItem('fuesmen_harefield','0');}catch(e){} soloMatch=!soloMatch; try{localStorage.setItem('fuesmen_solomatch',soloMatch?'1':'0');}catch(e){} applyView(true); };
     b2.onclick=function(){ viewSinTurno=false; viewHarefield=false; try{localStorage.setItem('fuesmen_harefield','0');}catch(e){} viewRevisar=!viewRevisar; applyView(true); };
     b6.onclick=function(){ viewHarefield=false; viewRevisar=false; soloMatch=false; try{localStorage.setItem('fuesmen_harefield','0');localStorage.setItem('fuesmen_solomatch','0');}catch(e){} viewSinTurno=!viewSinTurno; applyView(true); };
-    b7.textContent='🤖 Anular SIN TURNO'; b7.style.background='#a40e26'; b7.title='Automatiza los SIN TURNO: busca cada DNI ±3 días en FUESMEN y, con tu confirmación, anula en Italiano los que no tengan turno.';
+    b7.textContent='ðŸ¤– Anular SIN TURNO'; b7.style.background='#a40e26'; b7.title='Automatiza los SIN TURNO: busca cada DNI Â±3 dÃ­as en FUESMEN y, con tu confirmaciÃ³n, anula en Italiano los que no tengan turno.';
     b7.onclick=function(){ startSinTurnoFlow(); };
-    b3.textContent='⬇ Ir al final'; b3.style.background='#444c56';
+    b3.textContent='â¬‡ Ir al final'; b3.style.background='#444c56';
     b3.onclick=function(){ window.scrollTo({top:document.documentElement.scrollHeight, behavior:'smooth'}); };
-    var who=document.createElement('span'); who.style.cssText='font:600 12px Segoe UI;color:#fff;background:#24292f;padding:6px 10px;border-radius:8px'; who.textContent='👤 '+shortName(sbEmail());
+    var who=document.createElement('span'); who.style.cssText='font:600 12px Segoe UI;color:#fff;background:#24292f;padding:6px 10px;border-radius:8px'; who.textContent='ðŸ‘¤ '+shortName(sbEmail());
     var bx=document.createElement('button'); bx.textContent='Salir'; bx.style.cssText='font:700 12px Segoe UI;color:#fff;background:#6e7781;border:0;padding:9px 12px;border-radius:8px;cursor:pointer';
     bx.onclick=function(){ sbClearSession(); location.reload(); };
     bar.appendChild(b4); bar.appendChild(b5); bar.appendChild(b1); bar.appendChild(b6); bar.appendChild(b7); bar.appendChild(b2); bar.appendChild(b3); bar.appendChild(who); bar.appendChild(bx);
@@ -539,7 +567,7 @@
       if(a.dataset.fmDone) return;
       if(a.offsetParent===null) return;
       a.dataset.fmDone='1';
-      // Pedido N° en TODAS las filas (incl. las "sin turno", antes de cualquier return)
+      // Pedido NÂ° en TODAS las filas (incl. las "sin turno", antes de cualquier return)
       (function(){
         var prow=pedidoRow(a); if(!prow) return;
         var prtA=prow.querySelector('[onclick*="prt("]'); if(!prtA) return;
@@ -548,14 +576,14 @@
         if(mp && acc && !acc.querySelector('.fm-pedido')){
           var pn=document.createElement('div'); pn.className='fm-pedido';
           pn.style.cssText='font:800 13px Segoe UI;color:#1f6feb;margin-bottom:6px;white-space:nowrap';
-          pn.textContent='Pedido N° '+mp[1];
+          pn.textContent='Pedido NÂ° '+mp[1];
           acc.insertBefore(pn, acc.firstChild);
         }
       })();
       var info=parseRow(a); if(!info||!info.dni) return;
       var cands=bestForRow(info.dni,info.estudio);
       if(!cands.length){
-        // Pedido SIN turno asociado en A: ofrecer buscar el DNI en FUESMEN (±3 dias del pedido)
+        // Pedido SIN turno asociado en A: ofrecer buscar el DNI en FUESMEN (Â±3 dias del pedido)
         // para confirmar si el estudio se hizo; si no aparece, el operador lo anula.
         var cellsN=[].slice.call(info.tr.querySelectorAll('td'));
         var pacN=cellsN.filter(function(c){ return /DNI[-\s]?\d/i.test(c.textContent||''); })[0];
@@ -604,8 +632,8 @@
           tt.title='Buscar este turno en FUESMEN';
           tt.onclick=function(){ openHisTurno(t.turno); };
           l1.appendChild(tt);
-          var l2=document.createElement('div'); l2.style.cssText='font-size:12px;color:#57606a'; l2.textContent=t.fecha+' · '+nota;
-          var l3=document.createElement('div'); l3.style.cssText='font-size:12px;color:#1a7f37;font-weight:600;margin-top:1px'; l3.textContent='📋 '+(t.practicas.join(', ')||'(sin práctica)');
+          var l2=document.createElement('div'); l2.style.cssText='font-size:12px;color:#57606a'; l2.textContent=t.fecha+' Â· '+nota;
+          var l3=document.createElement('div'); l3.style.cssText='font-size:12px;color:#1a7f37;font-weight:600;margin-top:1px'; l3.textContent='ðŸ“‹ '+(t.practicas.join(', ')||'(sin prÃ¡ctica)');
           d1.appendChild(l1); d1.appendChild(l2); d1.appendChild(l3);
           p1.appendChild(d1); p1.appendChild(cargarBtn('#1f6feb', function(){ loadInforme(info,t.turno,t.practicas[0]||''); }));
           box.appendChild(p1);
@@ -625,7 +653,7 @@
         }
         if(info.pedidoId){
           var rb=document.createElement('button');
-          var rbLbl=function(){ rb.textContent = REVISAR[info.pedidoId] ? '✕ Quitar de "a revisar"' : '📌 Pendiente revisar'; rb.style.background = REVISAR[info.pedidoId] ? '#6e7781' : '#9a6700'; };
+          var rbLbl=function(){ rb.textContent = REVISAR[info.pedidoId] ? 'âœ• Quitar de "a revisar"' : 'ðŸ“Œ Pendiente revisar'; rb.style.background = REVISAR[info.pedidoId] ? '#6e7781' : '#9a6700'; };
           rb.style.cssText='display:inline-block;margin-top:8px;font:700 12px Segoe UI;color:#fff;border:0;padding:6px 12px;border-radius:7px;cursor:pointer';
           rbLbl();
           rb.onclick=function(ev){ ev.preventDefault(); var on=!REVISAR[info.pedidoId]; revSet(info.pedidoId, on); rbLbl(); applyView(); };
@@ -646,15 +674,15 @@
       var presCell=pacCell ? pacCell.nextElementSibling : null;
       if(presCell && presCell.tagName==='TD' && !presCell.querySelector('.fm-dni')){
         var dwrap=document.createElement('div'); dwrap.className='fm-dni'; dwrap.style.cssText='margin-top:8px';
-        var dbtn=document.createElement('button'); dbtn.textContent='🔍 DNI '+info.dni;
-        dbtn.title='Buscar este DNI en FUESMEN (rango ±3 días de la fecha del pedido)';
+        var dbtn=document.createElement('button'); dbtn.textContent='ðŸ” DNI '+info.dni;
+        dbtn.title='Buscar este DNI en FUESMEN (rango Â±3 dÃ­as de la fecha del pedido)';
         dbtn.style.cssText='font:700 12px Segoe UI;color:#fff;background:#1f6feb;border:0;padding:6px 11px;border-radius:7px;cursor:pointer';
         dbtn.onclick=function(){ openHisDni(info.dni, info.fechaPedido); };
         dwrap.appendChild(dbtn);
         if(cands.some(function(o){ return o.c.alerta; })){
           var fl=document.createElement('div');
           fl.style.cssText='margin-top:6px;font:800 12px Segoe UI;color:#fff;background:#d1242f;display:inline-block;padding:4px 9px;border-radius:6px';
-          fl.textContent='🚩 Trámite incompleto';
+          fl.textContent='ðŸš© TrÃ¡mite incompleto';
           dwrap.appendChild(fl);
         }
         var aseg=cands[0] && cands[0].c.aseg;
@@ -701,7 +729,7 @@
     var bar=document.createElement('div'); bar.className='fm-bsearch';
     bar.style.cssText='margin:8px 0;display:flex;gap:10px;align-items:center';
     var inp=document.createElement('input'); inp.className='fm-binput';
-    inp.placeholder='🔎 Buscar en esta página por DNI o apellido…';
+    inp.placeholder='ðŸ”Ž Buscar en esta pÃ¡gina por DNI o apellidoâ€¦';
     inp.style.cssText='flex:1;max-width:480px;font:14px Segoe UI;padding:8px 12px;border:2px solid #2ea043;border-radius:8px';
     inp.oninput=function(){ filterB(inp.value); };
     var lbl=document.createElement('span'); lbl.className='fm-bcount'; lbl.style.cssText='font:12px Segoe UI;color:#57606a';
@@ -755,25 +783,25 @@
     else { toast('Completado. No encontre BUSCAR; apretalo vos.','#9a6700'); }
   }
   function hisMode(turno){
-    var campo=hisFindField(/^N[º°o]?\.?\s*Turno/i, 14);
-    if(!campo){ toast('No encontre el campo "N Turno". Pegá a mano (copiado): '+turno,'#9a6700'); return; }
+    var campo=hisFindField(/^N[ÂºÂ°o]?\.?\s*Turno/i, 14);
+    if(!campo){ toast('No encontre el campo "N Turno". PegÃ¡ a mano (copiado): '+turno,'#9a6700'); return; }
     var doc=document.getElementById('_DOCUMENTOPERSONA'); if(doc) hisSetVal(doc,'');
     hisSetVal(campo, turno); campo.style.cssText+=';outline:3px solid #2ee6d6';
     var hoy=new Date(); var desde=new Date(); desde.setDate(desde.getDate()-179);
     hisRango(desde, hoy);
-    hisBuscar('Buscando turno '+turno+'…');
+    hisBuscar('Buscando turno '+turno+'â€¦');
   }
   function hisModeDni(dni, ref){
-    var campo=document.getElementById('_DOCUMENTOPERSONA') || hisFindField(/N[º°o]?\.?\s*Doc/i,12) || hisFindField(/Documento/i,14);
+    var campo=document.getElementById('_DOCUMENTOPERSONA') || hisFindField(/N[ÂºÂ°o]?\.?\s*Doc/i,12) || hisFindField(/Documento/i,14);
     if(!campo){ toast('No encontre el campo Documento en el HIS. DNI: '+dni,'#9a6700'); return; }
-    var tno=hisFindField(/^N[º°o]?\.?\s*Turno/i,14); if(tno) hisSetVal(tno,'0');
+    var tno=hisFindField(/^N[ÂºÂ°o]?\.?\s*Turno/i,14); if(tno) hisSetVal(tno,'0');
     hisSetVal(campo, dni); campo.style.cssText+=';outline:3px solid #2ee6d6';
     var m=(ref||'').match(/(\d{2})\D(\d{2})\D(\d{4})/);
     var base=m?new Date(+m[3], +m[2]-1, +m[1]):new Date();
     var d1=new Date(base); d1.setDate(d1.getDate()-3);
     var d2=new Date(base); d2.setDate(d2.getDate()+3);
     hisRango(d1, d2);
-    hisBuscar('Buscando DNI '+dni+' (±3 días de '+hfmt(base)+')…');
+    hisBuscar('Buscando DNI '+dni+' (Â±3 dÃ­as de '+hfmt(base)+')â€¦');
   }
   var PEDIDOMAP={};
   function buildPedidoMap(list){ PEDIDOMAP={}; (list||[]).forEach(function(w){ if(w && w.TurnoN && w.PedidoMed) PEDIDOMAP[String(w.TurnoN)]=w.PedidoMed; }); }
@@ -788,7 +816,7 @@
       tr.dataset.fmHis='1';
       var b=document.createElement('div'); b.className='fm-his-pedido'; b.setAttribute('data-turno',turno);
       b.style.cssText='font:800 12px Segoe UI;color:#0a5c28;background:#eafbf0;border:1px solid #2ea043;padding:2px 7px;border-radius:5px;margin-top:3px;display:inline-block';
-      b.textContent='N° Ref: '+PEDIDOMAP[turno];
+      b.textContent='NÂ° Ref: '+PEDIDOMAP[turno];
       cell.appendChild(b);
     });
   }
@@ -854,17 +882,17 @@
   function startSinTurnoFlow(){
     if(ST_POLL){ stShowProgressModal(); return; }
     var items=scanSinTurno();
-    if(!items.length){ toast('No hay pedidos SIN TURNO visibles. Activá la vista 🚫 SIN TURNO primero.','#9a6700'); return; }
-    var ok=window.confirm('Voy a buscar en FUESMEN '+items.length+' DNI (±3 días de la fecha del pedido).\n\nNO se borra nada todavía: al terminar te muestro cuáles quedaron SIN turno para que confirmes la anulación.\n\nDejá abierta la pestaña de FUESMEN. ¿Empezar?');
+    if(!items.length){ toast('No hay pedidos SIN TURNO visibles. ActivÃ¡ la vista ðŸš« SIN TURNO primero.','#9a6700'); return; }
+    var ok=window.confirm('Voy a buscar en FUESMEN '+items.length+' DNI (Â±3 dÃ­as de la fecha del pedido).\n\nNO se borra nada todavÃ­a: al terminar te muestro cuÃ¡les quedaron SIN turno para que confirmes la anulaciÃ³n.\n\nDejÃ¡ abierta la pestaÃ±a de FUESMEN. Â¿Empezar?');
     if(!ok) return;
     ST_ITEMS=items;
     var rows=items.map(function(it){ return {
       pedido_id:it.baja_id, informe_id:it.informe_id, dni:it.dni, fecha_pedido:it.fecha_pedido,
       estado:'buscando', resultado:'', usuario_email:sbEmail(), updated_at:new Date().toISOString() }; });
     sbStUpsert(rows, function(success){
-      if(!success){ toast('No pude encolar el lote en Supabase. Probá salir y entrar.','#d1242f'); return; }
+      if(!success){ toast('No pude encolar el lote en Supabase. ProbÃ¡ salir y entrar.','#d1242f'); return; }
       try{ window.open('http://his.fuesmen.edu.ar:8180/his/servlet/hturno?0#fuesmenSinTurno=1','fuesmenHIS'); }catch(e){}
-      toast('Lote encolado ('+rows.length+'). Buscando en FUESMEN…','#1f6feb');
+      toast('Lote encolado ('+rows.length+'). Buscando en FUESMENâ€¦','#1f6feb');
       stShowProgressModal();
       ST_POLL=setInterval(stPoll, 3000); stPoll();
     });
@@ -891,17 +919,17 @@
     var box=document.createElement('div'); box.style.cssText='background:#fff;max-width:620px;width:92%;max-height:84vh;display:flex;flex-direction:column;border-radius:12px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.4)';
     var head=document.createElement('div'); head.style.cssText='background:'+color+';color:#fff;padding:12px 16px;font:800 15px Segoe UI;display:flex;justify-content:space-between;align-items:center';
     var ht=document.createElement('span'); ht.textContent=title; head.appendChild(ht);
-    var x=document.createElement('button'); x.textContent='✕'; x.style.cssText='background:transparent;border:0;color:#fff;font-size:18px;cursor:pointer'; x.onclick=function(){ ov.remove(); }; head.appendChild(x);
+    var x=document.createElement('button'); x.textContent='âœ•'; x.style.cssText='background:transparent;border:0;color:#fff;font-size:18px;cursor:pointer'; x.onclick=function(){ ov.remove(); }; head.appendChild(x);
     box.appendChild(head); ov.appendChild(box); document.body.appendChild(ov);
     return { ov:ov, box:box, head:ht };
   }
   function stShowProgressModal(){
-    var s=stModalShell('fm-st-modal','🚫 Buscando SIN TURNO en FUESMEN…','#1f6feb');
+    var s=stModalShell('fm-st-modal','ðŸš« Buscando SIN TURNO en FUESMENâ€¦','#1f6feb');
     var body=document.createElement('div'); body.id='fm-st-body'; body.style.cssText='padding:16px;font:14px Segoe UI;color:#1f2328'; s.box.appendChild(body);
     var foot=document.createElement('div'); foot.style.cssText='padding:10px 16px;border-top:1px solid #eee;display:flex;gap:10px;justify-content:space-between;align-items:center';
     var hint=document.createElement('span'); hint.style.cssText='font:600 11px Segoe UI;color:#9a6700;flex:1';
-    hint.textContent='Tené abierta la pestaña de FUESMEN logueada. Podés seguir trabajando; corre en segundo plano.';
-    var stop=document.createElement('button'); stop.textContent='⛔ Detener';
+    hint.textContent='TenÃ© abierta la pestaÃ±a de FUESMEN logueada. PodÃ©s seguir trabajando; corre en segundo plano.';
+    var stop=document.createElement('button'); stop.textContent='â›” Detener';
     stop.style.cssText='font:800 13px Segoe UI;color:#fff;background:#d1242f;border:0;padding:9px 16px;border-radius:8px;cursor:pointer';
     stop.onclick=function(){ stStopAll(); };
     foot.appendChild(hint); foot.appendChild(stop);
@@ -915,8 +943,8 @@
         url:SB_URL+'/rest/v1/fuesmen_sinturno?estado=eq.buscando&usuario_email=eq.'+encodeURIComponent(sbEmail()),
         headers:{ 'apikey':SB_KEY,'Authorization':'Bearer '+t,'Content-Type':'application/json','Prefer':'return=minimal' },
         data:JSON.stringify({ estado:'error', resultado:'detenido por usuario', updated_at:new Date().toISOString() }),
-        onload:function(){ toast('Búsqueda detenida. No se anuló nada.','#9a6700'); },
-        onerror:function(){ toast('No pude avisar al servidor; cerrá la pestaña de FUESMEN para frenar.','#9a6700'); } });
+        onload:function(){ toast('BÃºsqueda detenida. No se anulÃ³ nada.','#9a6700'); },
+        onerror:function(){ toast('No pude avisar al servidor; cerrÃ¡ la pestaÃ±a de FUESMEN para frenar.','#9a6700'); } });
     });
     var m=document.getElementById('fm-st-modal'); if(m) m.remove();
   }
@@ -926,32 +954,32 @@
     body.innerHTML='<div style="font:700 14px Segoe UI;margin-bottom:8px">Progreso: '+done+' / '+c.total+'</div>'
       +'<div style="height:10px;background:#eee;border-radius:6px;overflow:hidden;margin-bottom:14px"><div style="height:100%;width:'+(c.total?Math.round(done/c.total*100):0)+'%;background:#1f6feb"></div></div>'
       +'<div style="display:flex;gap:18px;flex-wrap:wrap;font:600 13px Segoe UI">'
-      +'<span style="color:#1f6feb">🔎 Buscando: '+c.buscando+'</span>'
-      +'<span style="color:#d1242f">🗑 Sin turno (anular): '+c.vacio+'</span>'
-      +'<span style="color:#1a7f37">✓ Con turno: '+c.con+'</span>'
-      +(c.error?'<span style="color:#9a6700">⚠ Error: '+c.error+'</span>':'')
+      +'<span style="color:#1f6feb">ðŸ”Ž Buscando: '+c.buscando+'</span>'
+      +'<span style="color:#d1242f">ðŸ—‘ Sin turno (anular): '+c.vacio+'</span>'
+      +'<span style="color:#1a7f37">âœ“ Con turno: '+c.con+'</span>'
+      +(c.error?'<span style="color:#9a6700">âš  Error: '+c.error+'</span>':'')
       +'</div>';
   }
   function stShowConfirmDelete(jobs){
     var vacios=jobs.filter(function(j){ return j.estado==='vacio'; });
     var con=jobs.filter(function(j){ return j.estado==='con_resultados'; });
     var errs=jobs.filter(function(j){ return j.estado==='error'; });
-    var s=stModalShell('fm-st-modal','🗑 Confirmar anulación ('+vacios.length+')','#d1242f');
+    var s=stModalShell('fm-st-modal','ðŸ—‘ Confirmar anulaciÃ³n ('+vacios.length+')','#d1242f');
     var body=document.createElement('div'); body.style.cssText='overflow:auto;padding:12px 16px;flex:1';
     if(con.length){
       var note=document.createElement('div'); note.style.cssText='background:#eafbf0;border:1px solid #2ea043;border-radius:8px;padding:8px 10px;margin-bottom:10px;font:600 12px Segoe UI;color:#1a7f37';
-      note.textContent='ℹ '+con.length+' pedido(s) SÍ tienen turno en FUESMEN (±3 días) aunque faltaban en el export. NO se anulan: revisalos a mano.';
+      note.textContent='â„¹ '+con.length+' pedido(s) SÃ tienen turno en FUESMEN (Â±3 dÃ­as) aunque faltaban en el export. NO se anulan: revisalos a mano.';
       body.appendChild(note);
     }
     if(errs.length){
       var en=document.createElement('div'); en.style.cssText='background:#fff8e5;border:1px solid #e0a106;border-radius:8px;padding:8px 10px;margin-bottom:10px;font:600 12px Segoe UI;color:#8a5a00';
-      en.textContent='⚠ '+errs.length+' no se pudieron leer en FUESMEN. NO se anulan (quedan para revisar a mano).';
+      en.textContent='âš  '+errs.length+' no se pudieron leer en FUESMEN. NO se anulan (quedan para revisar a mano).';
       body.appendChild(en);
     }
-    if(!vacios.length){ var nd=document.createElement('div'); nd.style.cssText='color:#57606a;font:500 13px Segoe UI;padding:8px'; nd.textContent='No quedó ningún pedido para anular.'; body.appendChild(nd); }
+    if(!vacios.length){ var nd=document.createElement('div'); nd.style.cssText='color:#57606a;font:500 13px Segoe UI;padding:8px'; nd.textContent='No quedÃ³ ningÃºn pedido para anular.'; body.appendChild(nd); }
     else {
       var hint=document.createElement('div'); hint.style.cssText='font:600 12px Segoe UI;color:#b3261e;margin-bottom:8px';
-      hint.textContent='Estos pedidos NO tienen turno en FUESMEN en ±3 días. Al confirmar se anulan en Italiano (irreversible):';
+      hint.textContent='Estos pedidos NO tienen turno en FUESMEN en Â±3 dÃ­as. Al confirmar se anulan en Italiano (irreversible):';
       body.appendChild(hint);
       var tbl=document.createElement('table'); tbl.style.cssText='width:100%;border-collapse:collapse;font:13px Segoe UI';
       var hr=document.createElement('tr'); hr.style.cssText='text-align:left;color:#57606a;border-bottom:2px solid #eee';
@@ -969,13 +997,13 @@
     var cancel=document.createElement('button'); cancel.textContent='Cerrar (no anular)';
     cancel.style.cssText='font:700 13px Segoe UI;color:#24292f;background:#eaeef2;border:0;padding:9px 14px;border-radius:8px;cursor:pointer';
     cancel.onclick=function(){ s.ov.remove(); };
-    var del=document.createElement('button'); del.textContent='🗑 Anular seleccionados';
+    var del=document.createElement('button'); del.textContent='ðŸ—‘ Anular seleccionados';
     del.style.cssText='font:800 14px Segoe UI;color:#fff;background:'+(vacios.length?'#d1242f':'#6e7781')+';border:0;padding:10px 18px;border-radius:9px;cursor:'+(vacios.length?'pointer':'default'); del.disabled=!vacios.length;
     del.onclick=function(){
       var cks=[].slice.call(document.querySelectorAll('.fm-st-ck')).filter(function(c){ return c.checked; });
       var pids=cks.map(function(c){ return c.getAttribute('data-pid'); });
       if(!pids.length){ toast('No seleccionaste ninguno.','#9a6700'); return; }
-      if(!window.confirm('Vas a ANULAR '+pids.length+' pedido(s) en Italiano, en tandas de '+ANUL_BATCH+' con confirmación. Es IRREVERSIBLE. ¿Confirmás?')) return;
+      if(!window.confirm('Vas a ANULAR '+pids.length+' pedido(s) en Italiano, en tandas de '+ANUL_BATCH+' con confirmaciÃ³n. Es IRREVERSIBLE. Â¿ConfirmÃ¡s?')) return;
       s.ov.remove(); anularStart(pids);
     };
     foot.appendChild(cancel); foot.appendChild(del); s.box.appendChild(foot);
@@ -1003,19 +1031,19 @@
     var b=document.getElementById('fm-anular-stop');
     if(!b){ b=document.createElement('button'); b.id='fm-anular-stop';
       b.style.cssText='position:fixed;left:16px;bottom:16px;z-index:100002;font:800 14px Segoe UI;color:#fff;background:#d1242f;border:0;padding:11px 18px;border-radius:10px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.4)';
-      b.onclick=function(){ anularStop('Anulación detenida ('+anularNum('fuesmen_anular_done',0)+'/'+anularNum('fuesmen_anular_total',0)+').'); };
+      b.onclick=function(){ anularStop('AnulaciÃ³n detenida ('+anularNum('fuesmen_anular_done',0)+'/'+anularNum('fuesmen_anular_total',0)+').'); };
       document.body.appendChild(b);
     }
-    b.textContent='⛔ PARAR anulación ('+anularGet().length+' restantes)';
+    b.textContent='â›” PARAR anulaciÃ³n ('+anularGet().length+' restantes)';
   }
   function anularPauseDialog(done,total,left){
-    var s=stModalShell('fm-anular-pause','✋ Tanda completada','#9a6700');
+    var s=stModalShell('fm-anular-pause','âœ‹ Tanda completada','#9a6700');
     var body=document.createElement('div'); body.style.cssText='padding:16px;font:600 14px Segoe UI;color:#1f2328;line-height:1.5';
-    body.innerHTML='Anulaste <b>'+done+'</b> de <b>'+total+'</b>. Quedan <b>'+left+'</b>.<br><br>¿Seguir con la próxima tanda de hasta '+ANUL_BATCH+'?';
+    body.innerHTML='Anulaste <b>'+done+'</b> de <b>'+total+'</b>. Quedan <b>'+left+'</b>.<br><br>Â¿Seguir con la prÃ³xima tanda de hasta '+ANUL_BATCH+'?';
     s.box.appendChild(body);
     var foot=document.createElement('div'); foot.style.cssText='padding:12px 16px;border-top:1px solid #eee;display:flex;gap:10px;justify-content:flex-end';
-    var stop=document.createElement('button'); stop.textContent='Parar acá'; stop.style.cssText='font:700 13px Segoe UI;color:#24292f;background:#eaeef2;border:0;padding:9px 14px;border-radius:8px;cursor:pointer';
-    stop.onclick=function(){ s.ov.remove(); anularStop('Anulación detenida ('+done+'/'+total+').'); };
+    var stop=document.createElement('button'); stop.textContent='Parar acÃ¡'; stop.style.cssText='font:700 13px Segoe UI;color:#24292f;background:#eaeef2;border:0;padding:9px 14px;border-radius:8px;cursor:pointer';
+    stop.onclick=function(){ s.ov.remove(); anularStop('AnulaciÃ³n detenida ('+done+'/'+total+').'); };
     var cont=document.createElement('button'); cont.textContent='Continuar tanda'; cont.style.cssText='font:800 14px Segoe UI;color:#fff;background:#d1242f;border:0;padding:10px 18px;border-radius:9px;cursor:pointer';
     cont.onclick=function(){ s.ov.remove(); anularSetNum('fuesmen_anular_batchleft', ANUL_BATCH); anularProcess(); };
     foot.appendChild(stop); foot.appendChild(cont); s.box.appendChild(foot);
@@ -1024,7 +1052,7 @@
     if(!anularActive() || ANUL_BUSY) return;
     var q=anularGet();
     var done=anularNum('fuesmen_anular_done',0), total=anularNum('fuesmen_anular_total',0);
-    if(!q.length){ anularStop(); toast('✅ Anulación terminada ('+done+'/'+total+'). Recargá para ver la lista.','#1a7f37'); return; }
+    if(!q.length){ anularStop(); toast('âœ… AnulaciÃ³n terminada ('+done+'/'+total+'). RecargÃ¡ para ver la lista.','#1a7f37'); return; }
     anularStopBtn();
     var bleft=anularNum('fuesmen_anular_batchleft', ANUL_BATCH);
     if(bleft<=0){ anularPauseDialog(done,total,q.length); return; }
@@ -1032,7 +1060,7 @@
     var a=document.querySelector('[onclick*="baja('+pid+')"]');
     if(!a){
       if(ANUL_TRIES++ < 12){ setTimeout(anularProcess, 600); return; }
-      ANUL_TRIES=0; q.shift(); anularSet(q); sbStSetEstado(pid,'error','no encontrado en Italiano (no se anuló)');
+      ANUL_TRIES=0; q.shift(); anularSet(q); sbStSetEstado(pid,'error','no encontrado en Italiano (no se anulÃ³)');
       setTimeout(anularProcess, 200); return;
     }
     ANUL_TRIES=0; ANUL_BUSY=true;
@@ -1041,7 +1069,7 @@
     anularSetNum('fuesmen_anular_done', done+1);
     sbStSetEstado(pid,'anulado','baja() ok');
     anularStopBtn();
-    toast('Anulando '+pid+' ('+(done+1)+'/'+total+')…','#d1242f');
+    toast('Anulando '+pid+' ('+(done+1)+'/'+total+')â€¦','#d1242f');
     a.click(); // recarga la pagina; anularProcess se reanuda al cargar
   }
 
@@ -1063,7 +1091,7 @@
       bar.style.cssText='position:fixed;top:0;left:0;right:0;z-index:100002;background:#1f6feb;color:#fff;font:800 14px Segoe UI;padding:10px 16px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.35)';
       document.body.appendChild(bar); }
     var done=c.total-c.buscando;
-    bar.textContent='Asistente: buscando SIN TURNO en FUESMEN — '+done+' / '+c.total+' (no cierres esta pestaña)';
+    bar.textContent='Asistente: buscando SIN TURNO en FUESMEN â€” '+done+' / '+c.total+' (no cierres esta pestaÃ±a)';
   }
   // --- A: worker POSTBACK-reentrante. VERIFICADO en vivo: BUSCAR es <input
   //     type=submit> con POST nativo => RECARGA la pagina. No es AJAX. Por eso
@@ -1162,19 +1190,19 @@
     if(cached && cached.list && cached.list.length){
       WL_PAINTED_SIG = cached.sig || wlSig(cached.list);
       go(cached.list);
-      toast('Asistente activo · '+cached.list.length+' turnos · '+shortName(sbEmail()),'#0969da');
+      toast('Asistente activo Â· '+cached.list.length+' turnos Â· '+shortName(sbEmail()),'#0969da');
     }
 
     // 2) Refrescar en segundo plano; re-anotar SOLO si la worklist cambio.
     var fresh = cached && (Date.now()-(cached.t||0)) < WL_SOFT_MS;
     if(!fresh){
       sbFetchWorklistIfChanged(function(list){
-        if(!list){ if(!cached) toast('No pude leer la worklist. ¿Sesión vencida? Probá salir y entrar.','#d1242f'); return; }
+        if(!list){ if(!cached) toast('No pude leer la worklist. Â¿SesiÃ³n vencida? ProbÃ¡ salir y entrar.','#d1242f'); return; }
         var sig=wlSig(list);
 
         if(WL_PAINTED_SIG===sig) return;                 // sin cambios: no re-pintar
-        if(WL_PAINTED_SIG!==null){ clearAnnotations(); toast('Worklist actualizada · '+list.length+' turnos','#1a7f37'); }
-        else { toast('Asistente activo · '+list.length+' turnos · '+shortName(sbEmail()),'#0969da'); }
+        if(WL_PAINTED_SIG!==null){ clearAnnotations(); toast('Worklist actualizada Â· '+list.length+' turnos','#1a7f37'); }
+        else { toast('Asistente activo Â· '+list.length+' turnos Â· '+shortName(sbEmail()),'#0969da'); }
         WL_PAINTED_SIG=sig;
         go(list);
       });
@@ -1227,18 +1255,18 @@
     ov.style.cssText='position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-family:Segoe UI,sans-serif';
     var box=document.createElement('div'); box.style.cssText='background:#fff;padding:22px;border-radius:12px;width:320px;box-shadow:0 10px 40px rgba(0,0,0,.4)';
     var h=document.createElement('div'); h.style.cssText='font:800 16px Segoe UI;color:#1f2328'; h.textContent='Asistente FUESMEN';
-    var sub=document.createElement('div'); sub.style.cssText='font:13px Segoe UI;color:#57606a;margin:4px 0 14px'; sub.textContent='Ingresá con tu cuenta';
+    var sub=document.createElement('div'); sub.style.cssText='font:13px Segoe UI;color:#57606a;margin:4px 0 14px'; sub.textContent='IngresÃ¡ con tu cuenta';
     var em=document.createElement('input'); em.type='email'; em.placeholder='Email'; em.style.cssText=inpCss();
-    var pw=document.createElement('input'); pw.type='password'; pw.placeholder='Contraseña'; pw.style.cssText=inpCss();
+    var pw=document.createElement('input'); pw.type='password'; pw.placeholder='ContraseÃ±a'; pw.style.cssText=inpCss();
     var er=document.createElement('div'); er.style.cssText='color:#d1242f;font:12px Segoe UI;min-height:16px;margin:2px 0 8px';
     var bt=document.createElement('button'); bt.textContent='Entrar'; bt.style.cssText='width:100%;font:700 14px Segoe UI;color:#fff;background:#1f6feb;border:0;padding:10px;border-radius:8px;cursor:pointer';
-    function doLogin(){ er.textContent=''; bt.disabled=true; bt.textContent='Entrando…';
+    function doLogin(){ er.textContent=''; bt.disabled=true; bt.textContent='Entrandoâ€¦';
       sbLogin(em.value.trim(), pw.value, function(){ ov.remove(); cb && cb(); },
-        function(d){ bt.disabled=false; bt.textContent='Entrar'; er.textContent=(d&&(d.error_description||d.msg||d.message))||'No pude entrar. Revisá email y contraseña.'; }); }
+        function(d){ bt.disabled=false; bt.textContent='Entrar'; er.textContent=(d&&(d.error_description||d.msg||d.message))||'No pude entrar. RevisÃ¡ email y contraseÃ±a.'; }); }
     bt.onclick=doLogin;
     pw.addEventListener('keydown',function(e){ if(e.key==='Enter') doLogin(); });
     box.appendChild(h); box.appendChild(sub); box.appendChild(em); box.appendChild(pw); box.appendChild(er); box.appendChild(bt);
-    var bc=document.createElement('button'); bc.textContent='Cancelar (usar la página sin asistente)';
+    var bc=document.createElement('button'); bc.textContent='Cancelar (usar la pÃ¡gina sin asistente)';
     bc.style.cssText='width:100%;font:600 13px Segoe UI;color:#57606a;background:transparent;border:0;padding:8px;margin-top:8px;cursor:pointer;text-decoration:underline';
     bc.onclick=function(){ ov.remove(); };
     box.appendChild(bc);
@@ -1260,22 +1288,22 @@
     var ov=document.createElement('div'); ov.id='fm-cp';
     ov.style.cssText='position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-family:Segoe UI,sans-serif';
     var box=document.createElement('div'); box.style.cssText='background:#fff;padding:22px;border-radius:12px;width:340px;box-shadow:0 10px 40px rgba(0,0,0,.4)';
-    var h=document.createElement('div'); h.style.cssText='font:800 16px Segoe UI;color:#1f2328'; h.textContent='Creá tu contraseña';
-    var sub=document.createElement('div'); sub.style.cssText='font:13px Segoe UI;color:#57606a;margin:4px 0 14px'; sub.textContent='Es tu primer ingreso. Elegí una contraseña nueva (mínimo 6).';
-    var p1=document.createElement('input'); p1.type='password'; p1.placeholder='Nueva contraseña'; p1.style.cssText=inpCss();
-    var p2=document.createElement('input'); p2.type='password'; p2.placeholder='Repetir contraseña'; p2.style.cssText=inpCss();
+    var h=document.createElement('div'); h.style.cssText='font:800 16px Segoe UI;color:#1f2328'; h.textContent='CreÃ¡ tu contraseÃ±a';
+    var sub=document.createElement('div'); sub.style.cssText='font:13px Segoe UI;color:#57606a;margin:4px 0 14px'; sub.textContent='Es tu primer ingreso. ElegÃ­ una contraseÃ±a nueva (mÃ­nimo 6).';
+    var p1=document.createElement('input'); p1.type='password'; p1.placeholder='Nueva contraseÃ±a'; p1.style.cssText=inpCss();
+    var p2=document.createElement('input'); p2.type='password'; p2.placeholder='Repetir contraseÃ±a'; p2.style.cssText=inpCss();
     var er=document.createElement('div'); er.style.cssText='color:#d1242f;font:12px Segoe UI;min-height:16px;margin:2px 0 8px';
-    var bt=document.createElement('button'); bt.textContent='Guardar contraseña'; bt.style.cssText='width:100%;font:700 14px Segoe UI;color:#fff;background:#1f6feb;border:0;padding:10px;border-radius:8px;cursor:pointer';
+    var bt=document.createElement('button'); bt.textContent='Guardar contraseÃ±a'; bt.style.cssText='width:100%;font:700 14px Segoe UI;color:#fff;background:#1f6feb;border:0;padding:10px;border-radius:8px;cursor:pointer';
     function save(){
       er.textContent='';
-      if((p1.value||'').length<6){ er.textContent='Mínimo 6 caracteres.'; return; }
+      if((p1.value||'').length<6){ er.textContent='MÃ­nimo 6 caracteres.'; return; }
       if(p1.value!==p2.value){ er.textContent='No coinciden.'; return; }
       bt.disabled=true; bt.textContent='Guardando...';
       sbWithToken(function(t){
-        if(!t){ er.textContent='Sesión vencida, volvé a entrar.'; bt.disabled=false; bt.textContent='Guardar contraseña'; return; }
+        if(!t){ er.textContent='SesiÃ³n vencida, volvÃ© a entrar.'; bt.disabled=false; bt.textContent='Guardar contraseÃ±a'; return; }
         sbReq('PUT','/auth/v1/user', t, { password:p1.value, data:{ must_change:false } },
           function(){ ov.remove(); cb && cb(); },
-          function(d){ bt.disabled=false; bt.textContent='Guardar contraseña'; er.textContent=(d&&(d.msg||d.error_description||d.message))||'No se pudo cambiar.'; });
+          function(d){ bt.disabled=false; bt.textContent='Guardar contraseÃ±a'; er.textContent=(d&&(d.msg||d.error_description||d.message))||'No se pudo cambiar.'; });
       });
     }
     bt.onclick=save; p2.addEventListener('keydown',function(e){ if(e.key==='Enter') save(); });
@@ -1288,7 +1316,7 @@
       if(last && verCmp(last, SCRIPT_VER)<0){
         var bar=document.createElement('div'); bar.id='fm-ok';
         bar.style.cssText='position:fixed;top:0;left:0;right:0;z-index:100002;background:#1a7f37;color:#fff;font:800 15px Segoe UI,sans-serif;padding:12px 16px;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 2px 12px rgba(0,0,0,.35)';
-        bar.textContent='✓ Asistente actualizado a v'+SCRIPT_VER+'. Ya podés seguir.';
+        bar.textContent='âœ“ Asistente actualizado a v'+SCRIPT_VER+'. Ya podÃ©s seguir.';
         document.body.appendChild(bar);
         setTimeout(function(){ bar.style.transition='opacity .6s'; bar.style.opacity='0'; setTimeout(function(){ if(bar.parentNode) bar.remove(); },700); }, 6000);
       }
@@ -1298,7 +1326,7 @@
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
 })();
 
-// >>> FM-REPORTE START (módulo Reporte/Excel "A revisar")
+// >>> FM-REPORTE START (mÃ³dulo Reporte/Excel "A revisar")
 (function () {
   'use strict';
   if (window.__fmReporteInit) return; window.__fmReporteInit = true;
@@ -1307,7 +1335,7 @@
   function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function stamp(){ var d=new Date(),p=function(n){return(n<10?'0':'')+n;}; return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'_'+p(d.getHours())+p(d.getMinutes()); }
 
-  // ---- raspar la tabla "en proceso" (la de más filas) ----
+  // ---- raspar la tabla "en proceso" (la de mÃ¡s filas) ----
   function scrape(){
     var t=null,max=0;
     [].slice.call(document.querySelectorAll('table')).forEach(function(x){ if(x.rows.length>max){max=x.rows.length;t=x;} });
@@ -1320,23 +1348,23 @@
       var dm=(pacLines[0]||'').match(/^([A-Za-z]{2,4})\.?-?\s*([\d\.]+)/);
       var docTipo=dm?dm[1].toUpperCase():'', doc=dm?dm[2].replace(/\./g,''):'';
       var nombre='';
-      for(var k=1;k<pacLines.length;k++){ if(!/^(Ubicaci|Servicio|O\.S|N[°º]|Ambulatorio|Internado)/i.test(pacLines[k])){ nombre=pacLines[k]; break; } }
-      var ubic=(paciente.match(/Ubicaci[oó]n:\s*([^\n]+)/i)||[])[1]||'';
+      for(var k=1;k<pacLines.length;k++){ if(!/^(Ubicaci|Servicio|O\.S|N[Â°Âº]|Ambulatorio|Internado)/i.test(pacLines[k])){ nombre=pacLines[k]; break; } }
+      var ubic=(paciente.match(/Ubicaci[oÃ³]n:\s*([^\n]+)/i)||[])[1]||'';
       var servicio=(paciente.match(/Servicio:\s*([^\n]+)/i)||[])[1]||'';
       var os=(paciente.match(/O\.S\.?:\s*([^\n]+)/i)||[])[1]||'';
       var tipo=ubic?'Internado':(/Ambulatorio/i.test(paciente)?'Ambulatorio':'');
       var presName=(prestador.split('\n').map(clean).filter(Boolean)[0])||'';
-      var sinTurno=/sin turno/i.test(prestador), tram=/Tr[aá]mite incompleto/i.test(prestador);
+      var sinTurno=/sin turno/i.test(prestador), tram=/Tr[aÃ¡]mite incompleto/i.test(prestador);
       var aseg=(prestador.match(/Aseguradora:\s*([\s\S]*?)\s*(?=Cuenta:|$)/i)||[])[1]||'';
       var cuenta=(prestador.match(/Cuenta:\s*([^\n]+)/i)||[])[1]||'';
       var turnos=[];
       detalle.split('\n').forEach(function(ln){ var m=ln.match(/^Turno\s*(\d+)\s*-\s*(\d{4}-\d{2}-\d{2})\s*-\s*(.+)$/i); if(m) turnos.push({num:m[1],fecha:m[2],desc:clean(m[3])}); });
       var codigos=[]; detalle.split('\n').forEach(function(ln){ var m=ln.trim().match(/^(\d-\d{6})\s+(.+)$/); if(m) codigos.push(m[1]+' '+clean(m[2])); });
-      var diag=(detalle.match(/Diagn[oó]stico\s*\n\s*([^\n]+)/i)||[])[1]||''; if(/^Observaci/i.test(diag)) diag='';
-      var obs=(detalle.match(/Observaci[oó]n:\s*([^\n]*)/i)||[])[1]||'';
-      var pm=accion.match(/Pedido N[°º]\s*(\d+)/i);
+      var diag=(detalle.match(/Diagn[oÃ³]stico\s*\n\s*([^\n]+)/i)||[])[1]||''; if(/^Observaci/i.test(diag)) diag='';
+      var obs=(detalle.match(/Observaci[oÃ³]n:\s*([^\n]*)/i)||[])[1]||'';
+      var pm=accion.match(/Pedido N[Â°Âº]\s*(\d+)/i);
       var fl=fecha.split('\n').map(clean).filter(Boolean);
-      out.push({pedidoNro:pm?pm[1]:'',docTipo:docTipo,doc:doc,nombre:clean(nombre),tipo:tipo,fecha:fl[0]||'',ubicacion:clean(ubic),servicio:clean(servicio),os:clean(os),aseguradora:clean(aseg),cuenta:clean(cuenta),prestador:presName,estadoTurno:sinTurno?'SIN TURNO':(tram?'Trámite incompleto':(turnos.length?'Turnos candidatos':'-')),nTurnos:turnos.length,turnos:turnos,codigos:codigos,diagnostico:clean(diag),observacion:clean(obs)});
+      out.push({pedidoNro:pm?pm[1]:'',docTipo:docTipo,doc:doc,nombre:clean(nombre),tipo:tipo,fecha:fl[0]||'',ubicacion:clean(ubic),servicio:clean(servicio),os:clean(os),aseguradora:clean(aseg),cuenta:clean(cuenta),prestador:presName,estadoTurno:sinTurno?'SIN TURNO':(tram?'TrÃ¡mite incompleto':(turnos.length?'Turnos candidatos':'-')),nTurnos:turnos.length,turnos:turnos,codigos:codigos,diagnostico:clean(diag),observacion:clean(obs)});
     }
     return out;
   }
@@ -1344,25 +1372,25 @@
   // ---- construir el HTML del reporte ----
   function buildHTML(P){
     var nSin=P.filter(function(p){return p.estadoTurno==='SIN TURNO';}).length;
-    var nTra=P.filter(function(p){return p.estadoTurno==='Trámite incompleto';}).length;
+    var nTra=P.filter(function(p){return p.estadoTurno==='TrÃ¡mite incompleto';}).length;
     var nInt=P.filter(function(p){return p.tipo==='Internado';}).length;
     var fechaGen=new Date().toLocaleString('es-AR');
-    function tc(p){ return !p.turnos.length?'<span class="badge sin">'+esc(p.estadoTurno)+'</span>':'<span class="badge tra">'+p.nTurnos+' turno(s)</span><ul class="tlist">'+p.turnos.map(function(t){return '<li><b>'+esc(t.num)+'</b> · '+esc(t.fecha)+'<br><span class="td">'+esc(t.desc)+'</span></li>';}).join('')+'</ul>'; }
+    function tc(p){ return !p.turnos.length?'<span class="badge sin">'+esc(p.estadoTurno)+'</span>':'<span class="badge tra">'+p.nTurnos+' turno(s)</span><ul class="tlist">'+p.turnos.map(function(t){return '<li><b>'+esc(t.num)+'</b> Â· '+esc(t.fecha)+'<br><span class="td">'+esc(t.desc)+'</span></li>';}).join('')+'</ul>'; }
     var rh=P.map(function(p,i){
-      var ubic=p.tipo==='Internado'?(esc(p.ubicacion)+(p.servicio?' · '+esc(p.servicio):'')):'Ambulatorio';
+      var ubic=p.tipo==='Internado'?(esc(p.ubicacion)+(p.servicio?' Â· '+esc(p.servicio):'')):'Ambulatorio';
       var est=p.codigos.map(esc).join('<br>');
       return '<tr data-estado="'+esc(p.estadoTurno)+'" data-tipo="'+esc(p.tipo)+'" data-aseg="'+esc(p.aseguradora)+'" data-cuenta="'+esc(p.cuenta)+'"><td>'+(i+1)+'</td><td class="ped">'+esc(p.pedidoNro)+'</td><td class="dni">'+esc(p.docTipo)+' '+esc(p.doc)+'</td><td>'+esc(p.nombre)+'</td><td class="nw">'+esc(p.fecha)+'</td><td>'+ubic+'</td><td>'+esc(p.os)+'</td><td>'+esc(p.aseguradora)+'</td><td>'+esc(p.cuenta)+'</td><td>'+esc(p.prestador)+'</td><td>'+tc(p)+'</td><td>'+est+'</td><td>'+esc(p.diagnostico)+'</td><td>'+esc(p.observacion)+'</td></tr>';
     }).join('');
     var DATA=JSON.stringify(P).replace(/<\//g,'<\\/');
     return '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-    +'<title>A revisar - Pedidos Médicos FUESMEN/Italiano - '+fechaGen+'</title>'
+    +'<title>A revisar - Pedidos MÃ©dicos FUESMEN/Italiano - '+fechaGen+'</title>'
     +'<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"><\/script>'
     +'<style>:root{--b:#b91c1c}*{box-sizing:border-box}body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0;color:#1f2937;background:#f3f4f6}header{background:var(--b);color:#fff;padding:14px 20px}header h1{margin:0;font-size:18px}header .sub{font-size:12px;opacity:.9;margin-top:3px}.bar{position:sticky;top:0;background:#fff;padding:10px 20px;border-bottom:1px solid #e5e7eb;display:flex;gap:10px;flex-wrap:wrap;align-items:center;z-index:5}.bar input,.bar select{padding:7px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px}.bar input{flex:1;min-width:220px}.btn{border:0;border-radius:6px;padding:8px 12px;font-weight:700;font-size:13px;cursor:pointer;color:#fff}.btn.x{background:#1f883d}.btn.c{background:#0969da}.btn.r{background:#6e7781}.stat{font-size:12px;background:#eef2ff;color:#3730a3;padding:5px 9px;border-radius:20px;font-weight:600}.stat.r{background:#fee2e2;color:#991b1b}.stat.y{background:#fef9c3;color:#854d0e}.wrap{overflow:auto;padding:0 12px 40px}table{border-collapse:collapse;width:100%;background:#fff;font-size:12px}th,td{border:1px solid #e5e7eb;padding:6px 8px;vertical-align:top;text-align:left}th{background:#374151;color:#fff;position:sticky;top:58px;z-index:4;font-size:11px;white-space:nowrap}tr:nth-child(even){background:#fafafa}td.dni{font-weight:700;white-space:nowrap;color:#0f766e}td.ped{font-weight:600}td.nw{white-space:nowrap}.badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700}.badge.sin{background:#fee2e2;color:#991b1b}.badge.tra{background:#fef9c3;color:#854d0e}ul.tlist{margin:5px 0 0;padding-left:14px}ul.tlist li{margin-bottom:4px}.td{color:#6b7280;font-size:11px}.hide{display:none}@media print{.bar{display:none}th{position:static}}</style></head><body>'
-    +'<header><h1>Pedidos Médicos — Pestaña "A revisar"</h1><div class="sub">Hospital Italiano Mza. / FUESMEN-FINAMED · Generado: '+fechaGen+' · Total: '+P.length+' pedidos</div></header>'
-    +'<div class="bar"><input id="q" placeholder="Buscar por DNI, nombre, prestador, estudio, N° turno, pedido..."><select id="fEstado"><option value="">Todos los estados</option><option>SIN TURNO</option><option>Trámite incompleto</option></select><select id="fTipo"><option value="">Amb. + Internado</option><option>Ambulatorio</option><option>Internado</option></select><select id="fAseg"><option value="">Toda Aseguradora</option></select><select id="fCuenta"><option value="">Toda Cuenta</option></select>'
-    +'<button class="btn r" id="bClr">Limpiar</button><button class="btn x" id="bx">⬇ Exportar Excel</button><button class="btn c" id="bc">⬇ CSV</button>'
-    +'<span class="stat">Total: '+P.length+'</span><span class="stat r">Sin turno: '+nSin+'</span><span class="stat y">Trámite incompleto: '+nTra+'</span><span class="stat">Internados: '+nInt+'</span><span class="stat" id="shown"></span></div>'
-    +'<div class="wrap"><table id="t"><thead><tr><th>#</th><th>N° Pedido</th><th>Documento</th><th>Paciente</th><th>Fecha y hora</th><th>Tipo / Ubicación</th><th>O.S.</th><th>Aseguradora</th><th>Cuenta</th><th>Prestador</th><th>Turno(s)</th><th>Estudios solicitados</th><th>Diagnóstico</th><th>Observación</th></tr></thead><tbody>'+rh+'</tbody></table></div>'
+    +'<header><h1>Pedidos MÃ©dicos â€” PestaÃ±a "A revisar"</h1><div class="sub">Hospital Italiano Mza. / FUESMEN-FINAMED Â· Generado: '+fechaGen+' Â· Total: '+P.length+' pedidos</div></header>'
+    +'<div class="bar"><input id="q" placeholder="Buscar por DNI, nombre, prestador, estudio, NÂ° turno, pedido..."><select id="fEstado"><option value="">Todos los estados</option><option>SIN TURNO</option><option>TrÃ¡mite incompleto</option></select><select id="fTipo"><option value="">Amb. + Internado</option><option>Ambulatorio</option><option>Internado</option></select><select id="fAseg"><option value="">Toda Aseguradora</option></select><select id="fCuenta"><option value="">Toda Cuenta</option></select>'
+    +'<button class="btn r" id="bClr">Limpiar</button><button class="btn x" id="bx">â¬‡ Exportar Excel</button><button class="btn c" id="bc">â¬‡ CSV</button>'
+    +'<span class="stat">Total: '+P.length+'</span><span class="stat r">Sin turno: '+nSin+'</span><span class="stat y">TrÃ¡mite incompleto: '+nTra+'</span><span class="stat">Internados: '+nInt+'</span><span class="stat" id="shown"></span></div>'
+    +'<div class="wrap"><table id="t"><thead><tr><th>#</th><th>NÂ° Pedido</th><th>Documento</th><th>Paciente</th><th>Fecha y hora</th><th>Tipo / UbicaciÃ³n</th><th>O.S.</th><th>Aseguradora</th><th>Cuenta</th><th>Prestador</th><th>Turno(s)</th><th>Estudios solicitados</th><th>DiagnÃ³stico</th><th>ObservaciÃ³n</th></tr></thead><tbody>'+rh+'</tbody></table></div>'
     +'<script>var DATA='+DATA+';'
     +'var q=document.getElementById("q"),fe=document.getElementById("fEstado"),ft=document.getElementById("fTipo"),fa=document.getElementById("fAseg"),fc=document.getElementById("fCuenta"),sh=document.getElementById("shown");'
     +'function uniq(key){var s={};DATA.forEach(function(p){var v=(p[key]||"").trim();if(v)s[v]=1;});return Object.keys(s).sort(function(a,b){return a.localeCompare(b);});}'
@@ -1374,10 +1402,10 @@
     +'document.getElementById("bClr").onclick=function(){q.value="";fe.value="";ft.value="";fa.value="";fc.value="";flt();};'
     +'flt();'
     +'function stamp(){var d=new Date(),p=function(n){return(n<10?"0":"")+n;};return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"_"+p(d.getHours())+p(d.getMinutes());}'
-    +'function flat(){var out=[];DATA.forEach(function(p,i){var base={"#":i+1,"N° Pedido":p.pedidoNro,"Doc":p.docTipo,"Documento":p.doc,"Paciente":p.nombre,"Tipo":p.tipo||"","Ubicación":p.ubicacion||"","Servicio":p.servicio||"","O.S.":p.os||"","Aseguradora":p.aseguradora||"","Cuenta":p.cuenta||"","Prestador":p.prestador,"Fecha y hora":p.fecha,"Estado turno":p.estadoTurno,"Estudios solicitados":(p.codigos||[]).join(" | "),"Diagnóstico":p.diagnostico||"","Observación":p.observacion||""};'
-    +'if(p.turnos&&p.turnos.length){p.turnos.forEach(function(t){var r={};for(var kk in base)r[kk]=base[kk];r["Turno N°"]=t.num;r["Turno Fecha"]=t.fecha;r["Turno Estudio"]=t.desc;out.push(r);});}else{var r2={};for(var kk2 in base)r2[kk2]=base[kk2];r2["Turno N°"]="";r2["Turno Fecha"]="";r2["Turno Estudio"]="";out.push(r2);}});return out;}'
-    +'var COLS=["Fecha y hora","Turno N°","N° Pedido","Documento","Paciente","Estado turno","Estudios solicitados","Tipo","O.S.","Aseguradora","Cuenta","Observación"];var WID=[16,12,10,12,28,18,44,12,10,26,22,38];'
-    +'document.getElementById("bx").onclick=function(){if(typeof XLSX==="undefined"){alert("No se pudo cargar la librería de Excel (sin internet). Usá el botón CSV.");return;}var rs=flat().map(function(r){var o={};COLS.forEach(function(c){o[c]=r[c];});return o;});var ws=XLSX.utils.json_to_sheet(rs,{header:COLS});var rg=XLSX.utils.decode_range(ws["!ref"]);ws["!cols"]=WID.map(function(w){return {wch:w};});ws["!autofilter"]={ref:ws["!ref"]};ws["!rows"]=[{hpt:30}];var thin={style:"thin",color:{rgb:"D9D9D9"}};var bd={top:thin,bottom:thin,left:thin,right:thin};var num={"Turno N°":1,"Documento":1,"N° Pedido":1};for(var C=rg.s.c;C<=rg.e.c;C++){var h=ws[XLSX.utils.encode_cell({r:0,c:C})];if(h)h.s={font:{bold:true,sz:11,color:{rgb:"FFFFFF"}},fill:{patternType:"solid",fgColor:{rgb:"1F4E5F"}},alignment:{horizontal:"center",vertical:"center",wrapText:true},border:bd};}for(var R=1;R<=rg.e.r;R++){for(var K=rg.s.c;K<=rg.e.c;K++){var cl=ws[XLSX.utils.encode_cell({r:R,c:K})];if(!cl)continue;var isN=num[COLS[K]]===1;cl.s={alignment:{vertical:"top",wrapText:true,horizontal:isN?"center":"left"},border:bd,fill:{patternType:"solid",fgColor:{rgb:(R%2?"FFFFFF":"EAF1F4")}}};}}var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"A revisar");XLSX.writeFile(wb,"A_revisar_FUESMEN_"+stamp()+".xlsx");};'
+    +'function flat(){var out=[];DATA.forEach(function(p,i){var base={"#":i+1,"NÂ° Pedido":p.pedidoNro,"Doc":p.docTipo,"Documento":p.doc,"Paciente":p.nombre,"Tipo":p.tipo||"","UbicaciÃ³n":p.ubicacion||"","Servicio":p.servicio||"","O.S.":p.os||"","Aseguradora":p.aseguradora||"","Cuenta":p.cuenta||"","Prestador":p.prestador,"Fecha y hora":p.fecha,"Estado turno":p.estadoTurno,"Estudios solicitados":(p.codigos||[]).join(" | "),"DiagnÃ³stico":p.diagnostico||"","ObservaciÃ³n":p.observacion||""};'
+    +'if(p.turnos&&p.turnos.length){p.turnos.forEach(function(t){var r={};for(var kk in base)r[kk]=base[kk];r["Turno NÂ°"]=t.num;r["Turno Fecha"]=t.fecha;r["Turno Estudio"]=t.desc;out.push(r);});}else{var r2={};for(var kk2 in base)r2[kk2]=base[kk2];r2["Turno NÂ°"]="";r2["Turno Fecha"]="";r2["Turno Estudio"]="";out.push(r2);}});return out;}'
+    +'var COLS=["Fecha y hora","Turno NÂ°","NÂ° Pedido","Documento","Paciente","Estado turno","Estudios solicitados","Tipo","O.S.","Aseguradora","Cuenta","ObservaciÃ³n"];var WID=[16,12,10,12,28,18,44,12,10,26,22,38];'
+    +'document.getElementById("bx").onclick=function(){if(typeof XLSX==="undefined"){alert("No se pudo cargar la librerÃ­a de Excel (sin internet). UsÃ¡ el botÃ³n CSV.");return;}var rs=flat().map(function(r){var o={};COLS.forEach(function(c){o[c]=r[c];});return o;});var ws=XLSX.utils.json_to_sheet(rs,{header:COLS});var rg=XLSX.utils.decode_range(ws["!ref"]);ws["!cols"]=WID.map(function(w){return {wch:w};});ws["!autofilter"]={ref:ws["!ref"]};ws["!rows"]=[{hpt:30}];var thin={style:"thin",color:{rgb:"D9D9D9"}};var bd={top:thin,bottom:thin,left:thin,right:thin};var num={"Turno NÂ°":1,"Documento":1,"NÂ° Pedido":1};for(var C=rg.s.c;C<=rg.e.c;C++){var h=ws[XLSX.utils.encode_cell({r:0,c:C})];if(h)h.s={font:{bold:true,sz:11,color:{rgb:"FFFFFF"}},fill:{patternType:"solid",fgColor:{rgb:"1F4E5F"}},alignment:{horizontal:"center",vertical:"center",wrapText:true},border:bd};}for(var R=1;R<=rg.e.r;R++){for(var K=rg.s.c;K<=rg.e.c;K++){var cl=ws[XLSX.utils.encode_cell({r:R,c:K})];if(!cl)continue;var isN=num[COLS[K]]===1;cl.s={alignment:{vertical:"top",wrapText:true,horizontal:isN?"center":"left"},border:bd,fill:{patternType:"solid",fgColor:{rgb:(R%2?"FFFFFF":"EAF1F4")}}};}}var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"A revisar");XLSX.writeFile(wb,"A_revisar_FUESMEN_"+stamp()+".xlsx");};'
     +'document.getElementById("bc").onclick=function(){var rs=flat();var csv=COLS.join(";")+"\\n"+rs.map(function(r){return COLS.map(function(c){var v=r[c]==null?"":String(r[c]);return \'"\'+v.replace(/"/g,\'""\')+\'"\';}).join(";");}).join("\\n");var blob=new Blob(["\\ufeff"+csv],{type:"text/csv;charset=utf-8"});var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="A_revisar_FUESMEN_"+stamp()+".csv";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1500);};'
     +'<\/script></body></html>';
   }
@@ -1386,18 +1414,18 @@
     var P=scrape();
     if(!P.length){ alert('No se encontraron pedidos en la tabla "En proceso".'); return; }
     var w=window.open('','_blank');
-    if(!w){ alert('El navegador bloqueó la ventana emergente. Permití pop-ups para este sitio y volvé a intentar.'); return; }
+    if(!w){ alert('El navegador bloqueÃ³ la ventana emergente. PermitÃ­ pop-ups para este sitio y volvÃ© a intentar.'); return; }
     w.document.open(); w.document.write(buildHTML(P)); w.document.close();
   }
 
-  // ---- insertar el botón en la barra #fm-bar (idempotente) ----
+  // ---- insertar el botÃ³n en la barra #fm-bar (idempotente) ----
   function injectBtn(){
     var bar=document.getElementById('fm-bar');
     if(!bar || document.getElementById('fm-bRep')) return;
     var b=document.createElement('button'); b.id='fm-bRep';
-    b.textContent='📋 Reporte/Excel';
+    b.textContent='ðŸ“‹ Reporte/Excel';
     b.style.cssText='font:700 13px Segoe UI;color:#fff;border:0;padding:9px 14px;border-radius:8px;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.3);background:#1f883d';
-    b.title='Abre el reporte completo de "A revisar" con filtros y exportación a Excel/CSV';
+    b.title='Abre el reporte completo de "A revisar" con filtros y exportaciÃ³n a Excel/CSV';
     b.onclick=openReport;
     bar.appendChild(b);
   }
