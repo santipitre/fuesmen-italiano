@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.23
-// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote.
+// @version      7.26
+// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote. v7.26: boton copiar N Turno en grilla FUESMEN (HIS).
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @match        http://hitalianomza.no-ip.org:9000/*
@@ -805,6 +805,46 @@
   }
   var PEDIDOMAP={};
   function buildPedidoMap(list){ PEDIDOMAP={}; (list||[]).forEach(function(w){ if(w && w.TurnoN && w.PedidoMed) PEDIDOMAP[String(w.TurnoN)]=w.PedidoMed; }); }
+  // ---- Copiar N Turno (grilla FUESMEN / HIS) - v7.26 --------
+  // Boton chico junto al N Turno de cada fila para copiarlo al
+  // portapapeles. La pagina es HTTP => navigator.clipboard puede
+  // no estar disponible; fallback a textarea + execCommand('copy').
+  function fmCopyText(text){
+    try{ if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(String(text)); return true; } }catch(e){}
+    try{
+      var ta=document.createElement('textarea'); ta.value=String(text);
+      ta.setAttribute('readonly',''); ta.style.cssText='position:fixed;top:-1000px;left:-1000px;opacity:0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      try{ ta.setSelectionRange(0, ta.value.length); }catch(e){}
+      var ok=false; try{ ok=document.execCommand('copy'); }catch(e){}
+      ta.remove(); return ok;
+    }catch(e){ return false; }
+  }
+  function hisCopyTurno(){
+    [].slice.call(document.querySelectorAll('tr')).forEach(function(tr){
+      if(tr.dataset.fmCopyT) return;
+      var cells=[].slice.call(tr.querySelectorAll('td')); if(!cells.length) return;
+      var turno=null, cell=null;
+      for(var i=0;i<cells.length;i++){ var tx=(cells[i].textContent||'').replace(/\s+/g,''); var m=tx.match(/^(\d{6,8})(?!\d)/); if(m){ turno=m[1]; cell=cells[i]; break; } }
+      if(!turno) return;
+      tr.dataset.fmCopyT='1';
+      if(cell.querySelector('.fm-copy-turno')) return;
+      var t=turno;
+      var btn=document.createElement('button'); btn.type='button'; btn.className='fm-copy-turno';
+      btn.title='Copiar N Turno '+t; btn.textContent='\u{1F4CB}';
+      btn.style.cssText='margin-left:6px;font:800 12px Segoe UI;line-height:1;color:#1f6feb;background:#eef4ff;border:1px solid #1f6feb;padding:2px 6px;border-radius:5px;cursor:pointer;vertical-align:middle;display:inline-block';
+      btn.addEventListener('click', function(ev){
+        ev.stopPropagation(); ev.preventDefault();
+        var ok=fmCopyText(t);
+        btn.textContent = ok ? '\u2714' : '\u2716';
+        btn.style.background = ok ? '#eafbf0' : '#ffebe9';
+        btn.style.borderColor = ok ? '#2ea043' : '#d1242f';
+        if(typeof toast==='function') toast((ok?'Copiado N Turno ':'No pude copiar ')+t, ok?'#2ea043':'#d1242f');
+        setTimeout(function(){ btn.textContent='\u{1F4CB}'; btn.style.background='#eef4ff'; btn.style.borderColor='#1f6feb'; }, 1200);
+      }, true);
+      cell.appendChild(btn);
+    });
+  }
   function annotateHisGrid(){
     if(!Object.keys(PEDIDOMAP).length) return;
     [].slice.call(document.querySelectorAll('tr')).forEach(function(tr){
@@ -1229,13 +1269,13 @@
       window.addEventListener('hashchange', runHis);
       runHis();
       // v7.20: gate TTL tambien en host FUESMEN (antes re-bajaba la worklist en cada postback -> egress)
-      (function(){ var c=wlCacheGet(); if(c&&c.list&&c.list.length){ buildPedidoMap(c.list); annotateHisGrid(); } var fr=c&&(Date.now()-(c.t||0))<WL_SOFT_MS; if(!fr){ sbFetchWorklistIfChanged(function(l){ buildPedidoMap(l); annotateHisGrid(); }); } })();
-      [500,1300,2600].forEach(function(ms){ setTimeout(annotateHisGrid, ms); });
+      (function(){ var c=wlCacheGet(); if(c&&c.list&&c.list.length){ buildPedidoMap(c.list); annotateHisGrid(); } var fr=c&&(Date.now()-(c.t||0))<WL_SOFT_MS; if(!fr){ sbFetchWorklistIfChanged(function(l){ buildPedidoMap(l); annotateHisGrid(); }); } })(); hisCopyTurno();
+      [500,1300,2600].forEach(function(ms){ setTimeout(annotateHisGrid, ms); setTimeout(hisCopyTurno, ms); });
       // v7: loop SIN TURNO (se auto-encadena; el interval solo lo arranca si aparecen jobs)
       sinturnoWorker();
       [900,2200].forEach(function(ms){ setTimeout(sinturnoWorker, ms); });
       setInterval(sinturnoWorker, 4000);
-      var ht; new MutationObserver(function(){ clearTimeout(ht); ht=setTimeout(annotateHisGrid,400); }).observe(document.body,{childList:true,subtree:true});
+      var ht; new MutationObserver(function(){ clearTimeout(ht); ht=setTimeout(function(){ annotateHisGrid(); hisCopyTurno(); },400); }).observe(document.body,{childList:true,subtree:true});
       return;
     }
     var input=document.querySelector('#numero_informe');
