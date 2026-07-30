@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.27
-// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote. v7.26: boton copiar N Turno en grilla FUESMEN (HIS).
+// @version      7.28
+// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote. v7.26: boton copiar N Turno en grilla FUESMEN (HIS). v7.28: boton "Otorgar turno" en pedidos pendientes -> abre FUESMEN Vista Semanal y precarga Servicio+Estudio (resto manual) + overlay con datos del pedido.
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @match        http://hitalianomza.no-ip.org:9000/*
@@ -1474,3 +1474,193 @@
 })();
 // <<< FM-REPORTE END
 
+
+
+// >>> FM-OTORGAR START (v7.28) — boton "Otorgar turno" en pendientes de B + precarga Servicio/Estudio en FUESMEN (A)
+(function () {
+  'use strict';
+  if (window.__fmOtorgarInit) return; window.__fmOtorgarInit = true;
+
+  var HIS_VS = 'http://his.fuesmen.edu.ar:8180/his/servlet/hvistasemanal6';
+
+  // ---- fuzzy (misma tabla que el script principal) ----
+  var STOP = ['DE','DEL','LA','EL','LOS','LAS','CON','SIN','POR','Y','O','A','EXP','EXPOSICION',
+              'PRIMERA','SEGUNDA','OTROS','OTRO','OTRAS','REGIONES','ORGANOS','SIMPLE'];
+  var SYN = { TELERX:'TELERRADIOGRAFIA', TELERADIOGRAFIA:'TELERRADIOGRAFIA', TELERAD:'TELERRADIOGRAFIA',
+    RX:'RADIOGRAFIA', RADIOLOGIA:'RADIOGRAFIA', ECO:'ECOGRAFIA', ECODOPPLER:'ECOGRAFIA', DOPPLER:'ECOGRAFIA',
+    DOPP:'ECOGRAFIA', DUPLEX:'ECOGRAFIA', TC:'TOMOGRAFIA', TAC:'TOMOGRAFIA', HELICOIDAL:'TOMOGRAFIA',
+    RMN:'RESONANCIA', RM:'RESONANCIA', RNM:'RESONANCIA', TX:'TORAX' };
+  function norm(s){ return (s||'').toString().toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
+  function tokens(s){ return norm(s).split(' ').map(function(t){ return SYN[t]||t; }).filter(function(t){ return t.length>=3 && STOP.indexOf(t)<0 && !/^[0-9]+$/.test(t); }); }
+  function score(a,b){ var A=tokens(a),B=tokens(b); if(!A.length||!B.length) return 0; var sa={}; A.forEach(function(t){sa[t]=1;}); var sb={}; B.forEach(function(t){sb[t]=1;}); var i=0; Object.keys(sa).forEach(function(t){ if(sb[t]) i++; }); var u={}; A.concat(B).forEach(function(t){u[t]=1;}); return i/Object.keys(u).length; }
+  function esc(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function b64enc(o){ return btoa(unescape(encodeURIComponent(JSON.stringify(o)))); }
+  function b64dec(s){ try{ return JSON.parse(decodeURIComponent(escape(atob(s)))); }catch(e){ return null; } }
+
+  // ============================================================
+  // ===============  LADO B (Hospital Italiano)  ===============
+  // ============================================================
+  function otTable(){
+    var tabs=[].slice.call(document.querySelectorAll('table')), best=null;
+    tabs.forEach(function(t){
+      var hasP=[].slice.call(t.querySelectorAll('td,span,div')).some(function(c){ return /^\s*Pendiente\s*$/i.test(c.textContent||''); });
+      var hasDni=/DNI[-\s]?\d{6,9}/.test(t.innerText||'');
+      if(hasP && hasDni && (!best || t.rows.length<best.rows.length)) best=t;
+    });
+    return best;
+  }
+  function otExtract(tr){
+    var cells=[].slice.call(tr.cells);
+    var pacCell=cells.filter(function(c){ return /DNI[-\s]?\d/i.test(c.textContent||''); })[0];
+    if(!pacCell) return null;
+    var presCell=pacCell.nextElementSibling;
+    var detCell=cells.filter(function(c){ return /Pedido/i.test(c.textContent||'') && /\d\s*-\s*\d{4,6}/.test(c.textContent||''); })[0];
+    var accCell=cells[cells.length-1];
+    var pacTxt=pacCell.innerText||'';
+    var dni=(pacTxt.match(/DNI[-\s]?(\d{6,9})/)||[])[1]||'';
+    var pacLines=pacTxt.split('\n').map(function(s){ return s.trim(); }).filter(Boolean);
+    var paciente='';
+    for(var k=0;k<pacLines.length;k++){ if(!/DNI[-\s]?\d/.test(pacLines[k]) && !/^(Ambulatorio|Internado|Ubicaci|Servicio|O\.S)/i.test(pacLines[k])){ paciente=pacLines[k]; break; } }
+    var prestador=presCell ? ((presCell.innerText||'').trim().split('\n')[0]||'').trim() : '';
+    var detTxt=detCell ? (detCell.innerText||'') : '';
+    var mEst=detTxt.match(/(\d\s*-\s*\d{4,6})\s+([^\n]+)/);
+    var pedidoId='';
+    var infA=tr.querySelector('[onclick*="informe("]')||tr.querySelector('[onclick*="prt("]');
+    if(infA){ var mm=(infA.getAttribute('onclick')||'').match(/(?:informe|prt)\((\d+)\)/); pedidoId=mm?mm[1]:''; }
+    return { accCell:accCell, dni:dni, pac:paciente, med:prestador,
+             cod:mEst?mEst[1].replace(/\s/g,''):'', est:mEst?mEst[2].trim():'', ped:pedidoId };
+  }
+  function otOpen(info){
+    var pl={ est:info.est, cod:info.cod, dni:info.dni, pac:info.pac, med:info.med, ped:info.ped };
+    window.open(HIS_VS+'?0#fmAlta='+b64enc(pl), 'fuesmenHIS');
+  }
+  function injectOtorgar(){
+    var t=otTable(); if(!t) return;
+    [].slice.call(t.rows).forEach(function(tr){
+      if(!/DNI[-\s]?\d/i.test(tr.innerText||'')) return;
+      if(tr.dataset.fmOt) return;
+      var info=otExtract(tr); if(!info||!info.dni) return;
+      tr.dataset.fmOt='1';
+      var b=document.createElement('button'); b.className='fm-ot-btn';
+      b.textContent='🎫 Otorgar turno';
+      b.title='Abre FUESMEN (Vista Semanal) y precarga Servicio + Estudio de este pedido. El resto (hueco, paciente, financiador) lo cargas a mano.';
+      b.style.cssText='display:block;margin-top:6px;font:700 12px Segoe UI;color:#fff;background:#8250df;border:0;padding:7px 12px;border-radius:7px;cursor:pointer';
+      b.onclick=function(ev){ ev.preventDefault(); otOpen(info); };
+      (info.accCell||tr.cells[tr.cells.length-1]).appendChild(b);
+    });
+  }
+
+  // ============================================================
+  // ===================  LADO A (FUESMEN HIS)  =================
+  // ============================================================
+  function altaRead(){ try{ return JSON.parse(sessionStorage.getItem('fm_alta')||'null'); }catch(e){ return null; } }
+  function altaSave(o){ try{ sessionStorage.setItem('fm_alta', JSON.stringify(o)); }catch(e){} }
+  function altaClear(){ try{ sessionStorage.removeItem('fm_alta'); }catch(e){} }
+
+  function inferServicio(est){
+    var e=norm(est);
+    if(/DOPPLER|DUPLEX/.test(e)) return 'ECOGRAFIA DOPPLER';
+    if(/ECOGRAF|\bECO\b|TOCOGINECOL|OBSTETRIC/.test(e)) return 'ECOGRAFIA';
+    if(/MAMOGRAF/.test(e)) return 'MAMOGRAFIA';
+    if(/DENSITOMETR/.test(e)) return 'DENSITOMETRIA';
+    if(/CENTELLO|GAMMA|SPECT/.test(e)) return 'CAMARA GAMMA';
+    if(/\bPET\b/.test(e)) return 'PET';
+    if(/RESONAN|\bRMN\b|\bRNM\b|\bRM\b/.test(e)) return 'RESONANCIA';
+    if(/\bTC\b|\bTAC\b|TOMOGRAF|HELICOIDAL/.test(e)) return 'TOMOGRAFIA';
+    if(/\bRX\b|TELERX|RAYOS|RADIOGRAF|\bTORAX\b/.test(e)) return 'RAYOS X';
+    return '';
+  }
+  function pickOption(sel, want){
+    var w=norm(want); var opts=[].slice.call(sel.options), exact=null, part=null;
+    opts.forEach(function(o){ if(!o.value) return; var t=norm(o.text);
+      if(t===w){ exact=o; }
+      else if(!part && (t.indexOf(w)>=0 || w.indexOf(t)>=0) && t.length>1){ part=o; }
+    });
+    return exact||part;
+  }
+  function bestEstudio(sel, est){
+    var best=null;
+    [].slice.call(sel.options).forEach(function(o){ if(!o.value) return; var sc=score(est,o.text); if(!best||sc>best.sc) best={opt:o,sc:sc}; });
+    return best;
+  }
+  function fmFire(el){
+    try{ el.focus(); }catch(e){}
+    try{ el.dispatchEvent(new Event('input',{bubbles:true})); }catch(e){}
+    try{ el.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){}
+    try{ el.blur(); }catch(e){}
+  }
+  function altaOverlay(p, status){
+    var o=document.getElementById('fm-ot-ov');
+    if(!o){ o=document.createElement('div'); o.id='fm-ot-ov';
+      o.style.cssText='position:fixed;top:12px;right:12px;z-index:100000;width:300px;background:#fff;border:2px solid #8250df;border-radius:10px;box-shadow:0 6px 22px rgba(0,0,0,.32);font:13px Segoe UI;color:#1f2328;overflow:hidden';
+      document.body.appendChild(o);
+    }
+    o.innerHTML='<div style="background:#8250df;color:#fff;font-weight:800;padding:8px 12px;display:flex;justify-content:space-between;align-items:center">🎫 Turno a otorgar<span id="fm-ot-x" style="cursor:pointer">✕</span></div>'
+      +'<div style="padding:10px 12px;line-height:1.5">'
+      +'<div><b>DNI:</b> '+esc(p.dni)+'</div>'
+      +'<div><b>Paciente:</b> '+esc(p.pac)+'</div>'
+      +'<div><b>Estudio:</b> '+esc((p.cod?p.cod+' ':'')+(p.est||''))+'</div>'
+      +'<div><b>Medico:</b> '+esc(p.med)+'</div>'
+      +'<div style="margin-top:8px;padding-top:8px;border-top:1px solid #eee;color:#5a32a3;font-weight:700">'+esc(status||'')+'</div>'
+      +'</div>';
+    var x=document.getElementById('fm-ot-x'); if(x) x.onclick=function(){ o.remove(); altaClear(); };
+  }
+  function altaWorker(){
+    var raw=altaRead(); if(!raw||!raw.payload) return;
+    if(Date.now()-(raw.t||0) > 10*60000){ altaClear(); var ov=document.getElementById('fm-ot-ov'); if(ov) ov.remove(); return; }
+    var p=raw.payload;
+    var sv=document.querySelector('[name="_USUARIOSERVICIOID"]');
+    var ev=document.querySelector('[name="_ESTUDIOID"]');
+    if(!sv){ if(raw.svDone) altaOverlay(p,'Segui a mano aca: hueco, paciente, financiador'); return; }
+    raw.n=(raw.n||0)+1; if(raw.n>20){ altaSave(raw); altaOverlay(p,'Revisa a mano (no pude autocompletar)'); return; }
+    altaSave(raw);
+
+    // ---- paso 1: SERVICIO ----
+    if(!raw.svDone){
+      var want=inferServicio((p.est||'')+' '+(p.cod||''));
+      var opt=want?pickOption(sv,want):null;
+      if(!opt){ raw.svDone=1; raw.svFail=1; altaSave(raw); altaOverlay(p,'Elegi Servicio y Estudio a mano'); return; }
+      if(sv.value!==opt.value){
+        sv.value=opt.value; raw.svDone=1; altaSave(raw);
+        altaOverlay(p,'Cargando estudios de '+opt.text+'…');
+        fmFire(sv); return; // postback recarga la lista de estudios -> reentra
+      }
+      raw.svDone=1; altaSave(raw);
+    }
+
+    // ---- paso 2: ESTUDIO ----
+    if(!raw.esDone && ev){
+      var best=bestEstudio(ev,p.est);
+      if(best && best.sc>=0.34){
+        if(ev.value!==best.opt.value){ ev.value=best.opt.value; fmFire(ev); }
+        raw.esDone=1; raw.esName=best.opt.text; altaSave(raw);
+        altaOverlay(p,'✓ Servicio y estudio cargados. Segui a mano: hueco, paciente, financiador.');
+        return;
+      }
+      // lista aun vieja (AJAX no termino) o sin match: reintentar hasta agotar n
+      altaOverlay(p,'Buscando el estudio…');
+      return;
+    }
+    altaOverlay(p, raw.svFail ? 'Elegi Servicio y Estudio a mano' : '✓ Cargado. Segui a mano.');
+  }
+
+  // ============================================================
+  // ========================  ARRANQUE  ========================
+  // ============================================================
+  if(/his\.fuesmen\.edu\.ar/i.test(location.host)){
+    function readAltaHash(){
+      var h=location.hash||''; var ma=h.match(/fmAlta=([^&]+)/); if(!ma) return;
+      var pl=b64dec(ma[1]); if(pl){ altaSave({ payload:pl, t:Date.now(), n:0 }); }
+      try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+    }
+    window.addEventListener('hashchange', function(){ readAltaHash(); altaWorker(); });
+    readAltaHash(); altaWorker();
+    [400,900,1600,2600,4000].forEach(function(ms){ setTimeout(altaWorker, ms); });
+    var to; new MutationObserver(function(){ clearTimeout(to); to=setTimeout(altaWorker,350); }).observe(document.body,{childList:true,subtree:true});
+    return;
+  }
+  if(/hitalianomza/i.test(location.host) && /pedido-medico-grupo/i.test(location.pathname)){
+    setInterval(injectOtorgar, 1500); injectOtorgar();
+  }
+})();
+// <<< FM-OTORGAR END
