@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.29
-// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote. v7.26: boton copiar N Turno en grilla FUESMEN (HIS). v7.28: boton "Otorgar turno" en pendientes -> Vista Semanal + precarga Servicio+Estudio + overlay. v7.29: lee matricula y O.S. del detalle imprimible del pedido; DNI y matricula clickeables en el overlay (pegan en Documento y Mat. Derivante).
+// @version      7.30
+// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote. v7.26: boton copiar N Turno en grilla FUESMEN (HIS). v7.28: boton "Otorgar turno" en pendientes -> Vista Semanal + precarga Servicio+Estudio + overlay. v7.29: lee matricula y O.S. del detalle; DNI y matricula clickeables. v7.30: si el pedido es internado (Ubicacion piso/sala/cama), autocompleta Aseguradora=FINAMED SA y Cuenta=O.S. en la Vista Semanal; ambulatorios los carga el operador.
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @match        http://hitalianomza.no-ip.org:9000/*
@@ -1476,14 +1476,13 @@
 
 
 
-// >>> FM-OTORGAR START (v7.29) — boton "Otorgar turno" en pendientes de B + precarga Servicio/Estudio en FUESMEN (A) + lee matricula/O.S. del detalle y las hace clickeables
+// >>> FM-OTORGAR START (v7.30) — boton "Otorgar turno" en pendientes de B + precarga Servicio/Estudio (+ Aseguradora/Cuenta si internado) en FUESMEN (A) + lee matricula/O.S./internado del detalle y hace clickeables DNI y matricula
 (function () {
   'use strict';
   if (window.__fmOtorgarInit) return; window.__fmOtorgarInit = true;
 
   var HIS_VS = 'http://his.fuesmen.edu.ar:8180/his/servlet/hvistasemanal6';
 
-  // ---- fuzzy (misma tabla que el script principal) ----
   var STOP = ['DE','DEL','LA','EL','LOS','LAS','CON','SIN','POR','Y','O','A','EXP','EXPOSICION',
               'PRIMERA','SEGUNDA','OTROS','OTRO','OTRAS','REGIONES','ORGANOS','SIMPLE'];
   var SYN = { TELERX:'TELERRADIOGRAFIA', TELERADIOGRAFIA:'TELERRADIOGRAFIA', TELERAD:'TELERRADIOGRAFIA',
@@ -1534,7 +1533,7 @@
     return { accCell:accCell, dni:dni, pac:paciente, med:prestador,
              cod:mEst?mEst[1].replace(/\s/g,''):'', est:mEst?mEst[2].trim():'', ped:pedidoId };
   }
-  // Lee el detalle imprimible del pedido (POST a pedido-medico-prt.php) y saca matricula + O.S.
+  // Lee el detalle imprimible del pedido (POST a pedido-medico-prt.php): matricula, O.S., internado.
   function fetchDetail(pedidoId){
     return new Promise(function(resolve){
       if(!pedidoId || !document.formulario){ resolve({}); return; }
@@ -1551,7 +1550,9 @@
             var mat=(t.match(/Matr[ií]cula:?\s*(\d{2,7})/i)||[])[1]||'';
             var os=(t.match(/O\.?\s*S\.?\s*:\s*([A-Za-z0-9ÁÉÍÓÚÑ.][^]{1,40}?)(?:\s+(?:N[°º]|N[uú]mero|Cuenta|Ceja|Imprimir|Ambulatorio|Internado)\b|$)/i)||[])[1]
                  ||(t.match(/Otro\s*Social:\s*([A-Za-z0-9ÁÉÍÓÚÑ.][^]{1,40}?)(?:\s+(?:N[°º]|N[uú]mero|Cuenta|$))/i)||[])[1]||'';
-            resolve({ mat:mat, os:(os||'').trim() });
+            var ubic=(t.match(/Ubicaci[oó]n:\s*([^:]{0,60})/i)||[])[1]||'';
+            var internado=/piso|sala|cama/i.test(ubic);
+            resolve({ mat:mat, os:(os||'').trim(), int:internado });
           })
           .catch(function(){ resolve({}); });
       }catch(e){ resolve({}); }
@@ -1560,7 +1561,7 @@
   function otOpen(info){
     var w=null; try{ w=window.open('about:blank','fuesmenHIS'); }catch(e){}
     fetchDetail(info.ped).then(function(x){
-      var pl={ est:info.est, cod:info.cod, dni:info.dni, pac:info.pac, med:info.med, ped:info.ped, mat:(x&&x.mat)||'', os:(x&&x.os)||'' };
+      var pl={ est:info.est, cod:info.cod, dni:info.dni, pac:info.pac, med:info.med, ped:info.ped, mat:(x&&x.mat)||'', os:(x&&x.os)||'', int:!!(x&&x.int) };
       var url=HIS_VS+'?0#fmAlta='+b64enc(pl);
       if(w){ try{ w.location.href=url; return; }catch(e){} }
       window.open(url,'fuesmenHIS');
@@ -1575,7 +1576,7 @@
       tr.dataset.fmOt='1';
       var b=document.createElement('button'); b.className='fm-ot-btn';
       b.textContent='🎫 Otorgar turno';
-      b.title='Abre FUESMEN (Vista Semanal), precarga Servicio + Estudio y trae DNI + matricula + O.S. del pedido. El resto (hueco, paciente, financiador) lo cargas a mano.';
+      b.title='Abre FUESMEN (Vista Semanal), precarga Servicio+Estudio (y Aseguradora+Cuenta si es internado) y trae DNI+matricula+O.S. del pedido. Hueco, paciente y financiador de ambulatorios: a mano.';
       b.style.cssText='display:block;margin-top:6px;font:700 12px Segoe UI;color:#fff;background:#8250df;border:0;padding:7px 12px;border-radius:7px;cursor:pointer';
       b.onclick=function(ev){ ev.preventDefault(); otOpen(info); };
       (info.accCell||tr.cells[tr.cells.length-1]).appendChild(b);
@@ -1615,6 +1616,23 @@
     [].slice.call(sel.options).forEach(function(o){ if(!o.value) return; var sc=score(est,o.text); if(!best||sc>best.sc) best={opt:o,sc:sc}; });
     return best;
   }
+  function matchFinamed(sel){
+    var opts=[].slice.call(sel.options), pref=null, any=null;
+    opts.forEach(function(o){ if(!o.value) return; var t=norm(o.text);
+      if(/FINAMED/.test(t)){ if(!any) any=o; if(/HOSP ITAL/.test(t) || /PROV/.test(t)){ if(!pref) pref=o; } }
+    });
+    return pref||any;
+  }
+  function matchCuenta(sel, os){
+    var w=norm(os); if(!w) return null;
+    var opts=[].slice.call(sel.options), exact=null, part=null, fuzzy=null, fz=0;
+    opts.forEach(function(o){ if(!o.value) return; var t=norm(o.text);
+      if(t===w) exact=o;
+      else if(!part && w.length>=3 && (t.indexOf(w)>=0 || w.indexOf(t)>=0)) part=o;
+      var sc=score(os,o.text); if(sc>fz){ fz=sc; fuzzy=o; }
+    });
+    return exact||part||(fz>=0.5?fuzzy:null);
+  }
   function fmFire(el){
     try{ el.focus(); }catch(e){}
     try{ el.dispatchEvent(new Event('input',{bubbles:true})); }catch(e){}
@@ -1631,7 +1649,7 @@
   function altaOverlay(p, status){
     var o=document.getElementById('fm-ot-ov');
     if(!o){ o=document.createElement('div'); o.id='fm-ot-ov';
-      o.style.cssText='position:fixed;top:12px;right:12px;z-index:100000;width:308px;background:#fff;border:2px solid #8250df;border-radius:10px;box-shadow:0 6px 22px rgba(0,0,0,.32);font:13px Segoe UI;color:#1f2328;overflow:hidden';
+      o.style.cssText='position:fixed;top:12px;right:12px;z-index:100000;width:312px;background:#fff;border:2px solid #8250df;border-radius:10px;box-shadow:0 6px 22px rgba(0,0,0,.32);font:13px Segoe UI;color:#1f2328;overflow:hidden';
       document.body.appendChild(o);
     }
     var chip='cursor:pointer;background:#efe9fc;border:1px solid #c9b8f2;border-radius:6px;padding:1px 7px;font-weight:800;color:#5a32a3;text-decoration:underline';
@@ -1642,7 +1660,7 @@
       +'<div><b>Estudio:</b> '+esc((p.cod?p.cod+' ':'')+(p.est||''))+'</div>'
       +'<div><b>Medico:</b> '+esc(p.med)+'</div>'
       +(p.mat ? '<div><b>Matricula:</b> <span id="fm-ot-mat" style="'+chip+'" title="Clic: pega en Mat. Derivante">'+esc(p.mat)+'</span></div>' : '<div style="color:#b3261e"><b>Matricula:</b> no la pude leer del pedido</div>')
-      +(p.os ? '<div><b>O.S.:</b> '+esc(p.os)+'</div>' : '')
+      +'<div><b>'+(p.int?'INTERNADO':'Ambulatorio')+'</b>'+(p.os?' · O.S.: '+esc(p.os):'')+'</div>'
       +'<div style="margin-top:6px;font-size:11px;color:#8a8a8a">Clic en DNI → Documento · clic en Matricula → Mat. Derivante</div>'
       +'<div id="fm-ot-status" style="margin-top:8px;padding-top:8px;border-top:1px solid #eee;color:#5a32a3;font-weight:700">'+esc(status||'')+'</div>'
       +'</div>';
@@ -1657,8 +1675,8 @@
     var p=raw.payload;
     var sv=document.querySelector('[name="_USUARIOSERVICIOID"]');
     var ev=document.querySelector('[name="_ESTUDIOID"]');
-    if(!sv){ if(raw.svDone||raw.esDone) altaOverlay(p,'Segui a mano: hueco, paciente, financiador'); return; }
-    raw.n=(raw.n||0)+1; if(raw.n>20){ altaSave(raw); altaOverlay(p,'Revisa a mano (no pude autocompletar)'); return; }
+    if(!sv){ if(raw.svDone||raw.esDone) altaOverlay(p,'Segui a mano: hueco, paciente'+(p.int?'':', financiador')); return; }
+    raw.n=(raw.n||0)+1; if(raw.n>40){ altaSave(raw); altaOverlay(p,'Revisa a mano (no pude autocompletar todo)'); return; }
     altaSave(raw);
 
     // ---- paso 1: SERVICIO ----
@@ -1680,13 +1698,39 @@
       if(best && best.sc>=0.34){
         if(ev.value!==best.opt.value){ ev.value=best.opt.value; fmFire(ev); }
         raw.esDone=1; raw.esName=best.opt.text; altaSave(raw);
-        altaOverlay(p,'✓ Servicio y estudio cargados. Segui a mano: hueco, paciente, financiador.');
-        return;
-      }
-      altaOverlay(p,'Buscando el estudio…');
-      return;
+        altaOverlay(p, p.int?'Estudio cargado. Cargando financiador…':'✓ Servicio y estudio cargados. Segui a mano.');
+        if(!p.int) return;
+      } else { altaOverlay(p,'Buscando el estudio…'); return; }
     }
-    altaOverlay(p, raw.svFail ? 'Elegi Servicio y Estudio a mano' : '✓ Cargado. Segui a mano.');
+
+    // ---- paso 3/4: ASEGURADORA + CUENTA (solo internados: FINAMED SA + Cuenta=O.S.) ----
+    if(p.int && raw.esDone){
+      var fin=document.querySelector('[name="_FINANCIADORID"]');
+      var cta=document.querySelector('[name="_FINANCIADORCUENTAID"]');
+      if(fin && !raw.asDone){
+        var fopt=matchFinamed(fin);
+        if(fopt){
+          if(fin.value!==fopt.value){ fin.value=fopt.value; raw.asDone=1; altaSave(raw); altaOverlay(p,'Cargando cuentas de FINAMED…'); fmFire(fin); return; }
+          raw.asDone=1; altaSave(raw);
+        } else { raw.asDone=1; raw.asFail=1; altaSave(raw); }
+      }
+      if(cta && raw.asDone && !raw.ctDone){
+        var copt=p.os?matchCuenta(cta,p.os):null;
+        if(copt){ if(cta.value!==copt.value){ cta.value=copt.value; fmFire(cta); } raw.ctDone=1; raw.ctName=copt.text; altaSave(raw); }
+        else { raw.ctDone=1; raw.ctFail=1; altaSave(raw); }
+      }
+    }
+
+    // ---- estado final ----
+    var st;
+    if(raw.svFail){ st='Elegi Servicio y Estudio a mano'; }
+    else if(p.int){
+      st='✓ Servicio, estudio'+(raw.asFail?'':' , FINAMED');
+      if(raw.ctFail) st+=' · elegi la CUENTA a mano ('+(p.os||'?')+')';
+      else if(raw.ctName) st+=' · cuenta '+raw.ctName;
+      st+='. Segui a mano: hueco, paciente.';
+    } else { st='✓ Cargado. Segui a mano.'; }
+    altaOverlay(p, st);
   }
 
   // ============================================================
@@ -1700,7 +1744,7 @@
     }
     window.addEventListener('hashchange', function(){ readAltaHash(); altaWorker(); });
     readAltaHash(); altaWorker();
-    [400,900,1600,2600,4000].forEach(function(ms){ setTimeout(altaWorker, ms); });
+    [400,900,1600,2600,4000,6000].forEach(function(ms){ setTimeout(altaWorker, ms); });
     var to; new MutationObserver(function(){ clearTimeout(to); to=setTimeout(altaWorker,350); }).observe(document.body,{childList:true,subtree:true});
     return;
   }
