@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.31
-// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote. v7.26: boton copiar N Turno en grilla FUESMEN (HIS). v7.28: boton "Otorgar turno" en pendientes -> Vista Semanal + precarga Servicio+Estudio + overlay. v7.29: lee matricula y O.S. del detalle; DNI y matricula clickeables. v7.30: internados autocompleta Aseguradora=FINAMED SA y Cuenta=O.S. v7.31 FIX: el cartel usa localStorage (aparece en TODAS las pestanas de FUESMEN, no solo la que abrio el boton) + no pisa el mensaje de exito con "no pude autocompletar".
+// @version      7.32
+// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote. v7.26: boton copiar N Turno en grilla FUESMEN (HIS). v7.28: boton "Otorgar turno" en pendientes -> Vista Semanal + precarga Servicio+Estudio + overlay. v7.29: lee matricula y O.S. del detalle; DNI y matricula clickeables. v7.30: internados autocompleta Aseguradora=FINAMED SA y Cuenta=O.S. v7.31 FIX: cartel en localStorage (todas las pestanas) + no pisa el mensaje de exito. v7.32: cartel ARRASTRABLE desde su barra; en Nuevo Turno autocompleta Inst.Derivante=H ITALIANO siempre y marca INT si el pedido es internado.
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @match        http://hitalianomza.no-ip.org:9000/*
@@ -1476,7 +1476,7 @@
 
 
 
-// >>> FM-OTORGAR START (v7.31) — boton "Otorgar turno": precarga Servicio/Estudio (+Aseguradora/Cuenta si internado), lee matricula/O.S./internado del detalle, overlay con DNI/matricula clickeables. FIX v7.31: estado en localStorage (visible en TODAS las pestanas de FUESMEN) + no pisar el "listo" con "no pude autocompletar".
+// >>> FM-OTORGAR START (v7.32) — boton "Otorgar turno": precarga Servicio/Estudio (+Aseguradora/Cuenta si internado) en Vista Semanal, y en Nuevo Turno Inst.Derivante=H ITALIANO (+INT si internado). Lee matricula/O.S./internado del detalle. Overlay ARRASTRABLE con DNI/matricula clickeables. Estado en localStorage (todas las pestanas).
 (function () {
   'use strict';
   if (window.__fmOtorgarInit) return; window.__fmOtorgarInit = true;
@@ -1575,7 +1575,7 @@
       tr.dataset.fmOt='1';
       var b=document.createElement('button'); b.className='fm-ot-btn';
       b.textContent='🎫 Otorgar turno';
-      b.title='Abre FUESMEN (Vista Semanal), precarga Servicio+Estudio (y Aseguradora+Cuenta si internado) y trae DNI+matricula+O.S. del pedido.';
+      b.title='Abre FUESMEN, precarga Servicio+Estudio (+Aseguradora/Cuenta e INT si internado, +Inst.Derivante=H ITALIANO) y trae DNI+matricula+O.S. del pedido.';
       b.style.cssText='display:block;margin-top:6px;font:700 12px Segoe UI;color:#fff;background:#8250df;border:0;padding:7px 12px;border-radius:7px;cursor:pointer';
       b.onclick=function(ev){ ev.preventDefault(); otOpen(info); };
       (info.accCell||tr.cells[tr.cells.length-1]).appendChild(b);
@@ -1585,7 +1585,6 @@
   // ============================================================
   // ===================  LADO A (FUESMEN HIS)  =================
   // ============================================================
-  // v7.31: localStorage (compartido entre TODAS las pestanas de FUESMEN), no sessionStorage.
   function altaRead(){ try{ return JSON.parse(localStorage.getItem('fm_alta')||'null'); }catch(e){ return null; } }
   function altaSave(o){ try{ localStorage.setItem('fm_alta', JSON.stringify(o)); }catch(e){} }
   function altaClear(){ try{ localStorage.removeItem('fm_alta'); }catch(e){} }
@@ -1646,14 +1645,42 @@
     if(el){ try{ el.focus(); }catch(e){} el.value=val; fmFire(el); flashStatus(label+' pegado ✓ ('+val+')'); }
     else { flashStatus('Copiado '+val+'. Abri el form de turno para pegar '+label); }
   }
+
+  // Autocompletar el form de NUEVO TURNO (hturnosemanal5): Inst.Derivante=H ITALIANO siempre; INT si internado.
+  function fillTurnoForm(p, raw){
+    var inst=document.querySelector('[name="_INSTDERIVANTEID"]');
+    if(!inst) return; // no estamos en el form de turno
+    if(!raw.instDone){
+      var target=null;
+      [].slice.call(inst.options).forEach(function(o){ if(target) return; var t=norm(o.text);
+        if(o.value==='2' || /\bH\s*ITALIANO\b/.test(t) || /HOSP.*ITAL/.test(t) || t==='ITALIANO') target=o; });
+      if(target){ raw.instDone=1; altaSave(raw); if(inst.value!==target.value){ inst.value=target.value; fmFire(inst); } flashStatus('Inst. Derivante = H ITALIANO ✓'); }
+    }
+    if(p.int && !raw.tipoDone){
+      var radios=[].slice.call(document.querySelectorAll('[name="_VMTIPOTURNO"]'));
+      var intR=null;
+      radios.forEach(function(r){ if(intR) return;
+        var lab='';
+        if(r.id){ var lb=document.querySelector('label[for="'+r.id+'"]'); if(lb) lab=lb.textContent||''; }
+        if(!lab){ var ns=r.nextSibling, guard=0; while(ns && guard<4){ var tx=(ns.nodeType===3?ns.nodeValue:(ns.nodeType===1?ns.textContent:'')); if(tx && tx.trim()){ lab=tx; break; } ns=ns.nextSibling; guard++; } }
+        var v=(r.value||'');
+        if(/^INT$/i.test(v.trim()) || /\bINT\b/i.test(v) || /^\s*INT\b/i.test(lab) || /INTERNAD/i.test(lab)) intR=r;
+      });
+      if(intR){ raw.tipoDone=1; altaSave(raw); try{ intR.checked=true; }catch(e){} try{ intR.click(); }catch(e){} try{ intR.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){} flashStatus('Tipo turno = INT ✓'); }
+    }
+  }
+
   function altaOverlay(p, status){
     var o=document.getElementById('fm-ot-ov');
+    var sig=[p.dni,p.mat,p.os,p.int?'1':'0',status||''].join('|');
+    if(o && o.dataset.sig===sig) return; // no re-renderizar si no cambio (preserva el drag)
     if(!o){ o=document.createElement('div'); o.id='fm-ot-ov';
       o.style.cssText='position:fixed;top:12px;right:12px;z-index:100000;width:312px;background:#fff;border:2px solid #8250df;border-radius:10px;box-shadow:0 6px 22px rgba(0,0,0,.32);font:13px Segoe UI;color:#1f2328;overflow:hidden';
       document.body.appendChild(o);
     }
+    o.dataset.sig=sig;
     var chip='cursor:pointer;background:#efe9fc;border:1px solid #c9b8f2;border-radius:6px;padding:1px 7px;font-weight:800;color:#5a32a3;text-decoration:underline';
-    var html='<div style="background:#8250df;color:#fff;font-weight:800;padding:8px 12px;display:flex;justify-content:space-between;align-items:center">🎫 Turno a otorgar<span id="fm-ot-x" style="cursor:pointer">✕</span></div>'
+    o.innerHTML='<div id="fm-ot-head" style="background:#8250df;color:#fff;font-weight:800;padding:8px 12px;display:flex;justify-content:space-between;align-items:center;cursor:move;user-select:none">🎫 Turno a otorgar<span id="fm-ot-x" style="cursor:pointer">✕</span></div>'
       +'<div style="padding:10px 12px;line-height:1.6">'
       +'<div><b>DNI:</b> <span id="fm-ot-dni" style="'+chip+'" title="Clic: pega en Documento del paciente">'+esc(p.dni)+'</span></div>'
       +'<div><b>Paciente:</b> '+esc(p.pac)+'</div>'
@@ -1661,24 +1688,34 @@
       +'<div><b>Medico:</b> '+esc(p.med)+'</div>'
       +(p.mat ? '<div><b>Matricula:</b> <span id="fm-ot-mat" style="'+chip+'" title="Clic: pega en Mat. Derivante">'+esc(p.mat)+'</span></div>' : '<div style="color:#b3261e"><b>Matricula:</b> no la pude leer del pedido</div>')
       +'<div><b>'+(p.int?'INTERNADO':'Ambulatorio')+'</b>'+(p.os?' · O.S.: '+esc(p.os):'')+'</div>'
-      +'<div style="margin-top:6px;font-size:11px;color:#8a8a8a">Clic en DNI → Documento · clic en Matricula → Mat. Derivante</div>'
+      +'<div style="margin-top:6px;font-size:11px;color:#8a8a8a">Clic en DNI → Documento · clic en Matricula → Mat. Derivante · arrastra la barra para mover</div>'
       +'<div id="fm-ot-status" style="margin-top:8px;padding-top:8px;border-top:1px solid #eee;color:#5a32a3;font-weight:700">'+esc(status||'')+'</div>'
       +'</div>';
-    o.innerHTML=html;
-    var x=document.getElementById('fm-ot-x'); if(x) x.onclick=function(){ o.remove(); altaClear(); };
+    var x=document.getElementById('fm-ot-x'); if(x) x.onclick=function(ev){ ev.stopPropagation(); o.remove(); altaClear(); };
     var dc=document.getElementById('fm-ot-dni'); if(dc) dc.onclick=function(){ pasteInto('_DOCUMENTOPACIENTE', p.dni, 'DNI'); };
     var mc=document.getElementById('fm-ot-mat'); if(mc) mc.onclick=function(){ pasteInto('_DERIVANTEMATRICULA', p.mat, 'Matricula'); };
+    var head=document.getElementById('fm-ot-head');
+    if(head){ head.onmousedown=function(e){
+      if(e.target && e.target.id==='fm-ot-x') return;
+      e.preventDefault();
+      var rect=o.getBoundingClientRect(), offX=e.clientX-rect.left, offY=e.clientY-rect.top;
+      o.style.right='auto'; o.style.left=rect.left+'px'; o.style.top=rect.top+'px';
+      function mv(ev){ o.style.left=Math.max(0,ev.clientX-offX)+'px'; o.style.top=Math.max(0,ev.clientY-offY)+'px'; }
+      function up(){ document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up); }
+      document.addEventListener('mousemove',mv); document.addEventListener('mouseup',up);
+    }; }
   }
+
   function altaWorker(){
     var raw=altaRead(); if(!raw||!raw.payload) return;
     if(Date.now()-(raw.t||0) > 10*60000){ altaClear(); var ov=document.getElementById('fm-ot-ov'); if(ov) ov.remove(); return; }
     var p=raw.payload;
-    // Ya terminado: mostrar SIEMPRE el cartel con el mensaje final, sin volver a contar ni pisarlo.
-    if(raw.done){ altaOverlay(p, raw.msg||'✓ Cargado. Segui a mano.'); return; }
+    altaOverlay(p, raw.msg||'Datos del pedido');       // SIEMPRE mostrar el cartel
+    fillTurnoForm(p, raw);                              // autocompletar el form de turno si estamos ahi
+    if(raw.done) return;                               // Vista Semanal ya completa
     var sv=document.querySelector('[name="_USUARIOSERVICIOID"]');
     var ev=document.querySelector('[name="_ESTUDIOID"]');
-    // No estamos en la Vista Semanal (otra pantalla/pestana de FUESMEN): mostrar igual el cartel.
-    if(!sv){ altaOverlay(p, raw.msg||'Datos del pedido · segui a mano donde estes'); return; }
+    if(!sv) return;                                    // no es la Vista Semanal
     raw.n=(raw.n||0)+1;
     if(raw.n>40){ raw.done=1; raw.msg='Revisa a mano (no pude autocompletar todo)'; altaSave(raw); altaOverlay(p,raw.msg); return; }
     altaSave(raw);
@@ -1698,7 +1735,7 @@
       if(best && best.sc>=0.34){
         if(ev.value!==best.opt.value){ ev.value=best.opt.value; fmFire(ev); }
         raw.esDone=1; raw.esName=best.opt.text; altaSave(raw);
-        if(!p.int){ raw.done=1; raw.msg='✓ Servicio y estudio cargados. Segui a mano: hueco, paciente, financiador.'; altaSave(raw); altaOverlay(p,raw.msg); return; }
+        if(!p.int){ raw.done=1; raw.msg='✓ Servicio y estudio cargados. En el turno: Inst.Derivante=H ITALIANO auto. Segui a mano: hueco, paciente, financiador.'; altaSave(raw); altaOverlay(p,raw.msg); return; }
         raw.msg='Estudio cargado. Cargando financiador…'; altaSave(raw); altaOverlay(p,raw.msg);
       } else { raw.msg='Buscando el estudio…'; altaSave(raw); altaOverlay(p,raw.msg); return; }
     }
@@ -1715,14 +1752,14 @@
         } else { raw.asDone=1; raw.asFail=1; raw.done=1; raw.msg='✓ Servicio, estudio. Elegi Aseguradora y Cuenta a mano.'; altaSave(raw); altaOverlay(p,raw.msg); return; }
       }
       if(raw.asDone && !raw.ctDone){
-        if(!cta){ raw.msg='Cargando cuentas…'; altaSave(raw); altaOverlay(p,raw.msg); return; } // esperar postback de cuentas
+        if(!cta){ raw.msg='Cargando cuentas…'; altaSave(raw); altaOverlay(p,raw.msg); return; }
         var copt=p.os?matchCuenta(cta,p.os):null;
         if(copt){ if(cta.value!==copt.value){ cta.value=copt.value; fmFire(cta); } raw.ctDone=1; raw.ctName=copt.text; altaSave(raw); }
         else { raw.ctDone=1; raw.ctFail=1; altaSave(raw); }
       }
       if(raw.asDone && raw.ctDone){
         raw.done=1;
-        raw.msg='✓ Servicio, estudio, FINAMED'+(raw.ctFail?' · elegi la CUENTA a mano ('+(p.os||'?')+')':(raw.ctName?' · cuenta '+raw.ctName:''))+'. Segui a mano: hueco, paciente.';
+        raw.msg='✓ Servicio, estudio, FINAMED'+(raw.ctFail?' · elegi la CUENTA a mano ('+(p.os||'?')+')':(raw.ctName?' · cuenta '+raw.ctName:''))+'. En el turno: Inst.Derivante=H ITALIANO + INT auto. Segui a mano: hueco, paciente.';
         altaSave(raw); altaOverlay(p,raw.msg); return;
       }
     }
@@ -1740,11 +1777,10 @@
       try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
     }
     window.addEventListener('hashchange', function(){ readAltaHash(); altaWorker(); });
-    // Cambios de localStorage en OTRA pestana (nueva alta / se completo) -> refrescar el cartel aca.
     window.addEventListener('storage', function(e){ if(e.key==='fm_alta') altaWorker(); });
     readAltaHash(); altaWorker();
     [400,900,1600,2600,4000,6000].forEach(function(ms){ setTimeout(altaWorker, ms); });
-    setInterval(altaWorker, 2000); // backup: cualquier pestana de FUESMEN muestra el cartel si hay alta activa
+    setInterval(altaWorker, 2000);
     var to; new MutationObserver(function(){ clearTimeout(to); to=setTimeout(altaWorker,350); }).observe(document.body,{childList:true,subtree:true});
     return;
   }
