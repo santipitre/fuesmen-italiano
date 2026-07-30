@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Asistente FUESMEN -> Hospital Italiano
 // @namespace    fuesmen.local
-// @version      7.28
-// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote. v7.26: boton copiar N Turno en grilla FUESMEN (HIS). v7.28: boton "Otorgar turno" en pedidos pendientes -> abre FUESMEN Vista Semanal y precarga Servicio+Estudio (resto manual) + overlay con datos del pedido.
+// @version      7.29
+// @description  Asistente multiusuario: login Supabase, worklist y coordinacion (lock al cargar) en la nube. Muestra el N de turno de FUESMEN al lado de cada pedido y lo carga en "Numero de informe". v7: automatizacion SIN TURNO (busca DNI +-3 dias en FUESMEN y anula en Italiano con confirmacion en lote). v7.7: cache local de worklist => la info propia (turnos/badges/contadores) aparece al instante en cada recarga; refresca en segundo plano y repinta solo si cambio. v7.8: el N de pedido aparece en todas las filas (incluidas las sin turno). v7.9: en la grilla de FUESMEN el N° Ref aparece en TODAS las filas del turno (antes solo en la primera) y el badge se renombra a "N° Ref". v7.10: la anulacion SIN TURNO ahora sobrevive las recargas (cola en localStorage), procesa en tandas de 20 con confirmacion entre tandas y boton PARAR; ya no se marca anulado si no se encontro el boton baja(). v7.11: tras cada accion la vista vuelve al tope (el postback de GeneXus saltaba al fondo); se cancela si el usuario scrollea y se respeta la carga en lote. v7.26: boton copiar N Turno en grilla FUESMEN (HIS). v7.28: boton "Otorgar turno" en pendientes -> Vista Semanal + precarga Servicio+Estudio + overlay. v7.29: lee matricula y O.S. del detalle imprimible del pedido; DNI y matricula clickeables en el overlay (pegan en Documento y Mat. Derivante).
 // @updateURL    https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @downloadURL  https://raw.githubusercontent.com/santipitre/fuesmen-italiano/main/fuesmen-italiano.user.js
 // @match        http://hitalianomza.no-ip.org:9000/*
@@ -1476,7 +1476,7 @@
 
 
 
-// >>> FM-OTORGAR START (v7.28) — boton "Otorgar turno" en pendientes de B + precarga Servicio/Estudio en FUESMEN (A)
+// >>> FM-OTORGAR START (v7.29) — boton "Otorgar turno" en pendientes de B + precarga Servicio/Estudio en FUESMEN (A) + lee matricula/O.S. del detalle y las hace clickeables
 (function () {
   'use strict';
   if (window.__fmOtorgarInit) return; window.__fmOtorgarInit = true;
@@ -1496,6 +1496,10 @@
   function esc(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function b64enc(o){ return btoa(unescape(encodeURIComponent(JSON.stringify(o)))); }
   function b64dec(s){ try{ return JSON.parse(decodeURIComponent(escape(atob(s)))); }catch(e){ return null; } }
+  function copyClip(txt){
+    try{ if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt); return; } }catch(e){}
+    try{ var ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }catch(e){}
+  }
 
   // ============================================================
   // ===============  LADO B (Hospital Italiano)  ===============
@@ -1530,9 +1534,37 @@
     return { accCell:accCell, dni:dni, pac:paciente, med:prestador,
              cod:mEst?mEst[1].replace(/\s/g,''):'', est:mEst?mEst[2].trim():'', ped:pedidoId };
   }
+  // Lee el detalle imprimible del pedido (POST a pedido-medico-prt.php) y saca matricula + O.S.
+  function fetchDetail(pedidoId){
+    return new Promise(function(resolve){
+      if(!pedidoId || !document.formulario){ resolve({}); return; }
+      try{
+        var f=document.formulario, body=new URLSearchParams();
+        [].slice.call(f.elements).forEach(function(e){ if(e.name) body.set(e.name, e.value); });
+        body.set('id_pedido_medico', pedidoId);
+        fetch('pedido-medico-prt.php',{method:'POST',body:body})
+          .then(function(r){ return r.text(); })
+          .then(function(html){
+            var doc=new DOMParser().parseFromString(html,'text/html');
+            [].slice.call(doc.querySelectorAll('script,style')).forEach(function(s){ s.remove(); });
+            var t=(doc.body?doc.body.textContent:'').replace(/\s+/g,' ').trim();
+            var mat=(t.match(/Matr[ií]cula:?\s*(\d{2,7})/i)||[])[1]||'';
+            var os=(t.match(/O\.?\s*S\.?\s*:\s*([A-Za-z0-9ÁÉÍÓÚÑ.][^]{1,40}?)(?:\s+(?:N[°º]|N[uú]mero|Cuenta|Ceja|Imprimir|Ambulatorio|Internado)\b|$)/i)||[])[1]
+                 ||(t.match(/Otro\s*Social:\s*([A-Za-z0-9ÁÉÍÓÚÑ.][^]{1,40}?)(?:\s+(?:N[°º]|N[uú]mero|Cuenta|$))/i)||[])[1]||'';
+            resolve({ mat:mat, os:(os||'').trim() });
+          })
+          .catch(function(){ resolve({}); });
+      }catch(e){ resolve({}); }
+    });
+  }
   function otOpen(info){
-    var pl={ est:info.est, cod:info.cod, dni:info.dni, pac:info.pac, med:info.med, ped:info.ped };
-    window.open(HIS_VS+'?0#fmAlta='+b64enc(pl), 'fuesmenHIS');
+    var w=null; try{ w=window.open('about:blank','fuesmenHIS'); }catch(e){}
+    fetchDetail(info.ped).then(function(x){
+      var pl={ est:info.est, cod:info.cod, dni:info.dni, pac:info.pac, med:info.med, ped:info.ped, mat:(x&&x.mat)||'', os:(x&&x.os)||'' };
+      var url=HIS_VS+'?0#fmAlta='+b64enc(pl);
+      if(w){ try{ w.location.href=url; return; }catch(e){} }
+      window.open(url,'fuesmenHIS');
+    });
   }
   function injectOtorgar(){
     var t=otTable(); if(!t) return;
@@ -1543,7 +1575,7 @@
       tr.dataset.fmOt='1';
       var b=document.createElement('button'); b.className='fm-ot-btn';
       b.textContent='🎫 Otorgar turno';
-      b.title='Abre FUESMEN (Vista Semanal) y precarga Servicio + Estudio de este pedido. El resto (hueco, paciente, financiador) lo cargas a mano.';
+      b.title='Abre FUESMEN (Vista Semanal), precarga Servicio + Estudio y trae DNI + matricula + O.S. del pedido. El resto (hueco, paciente, financiador) lo cargas a mano.';
       b.style.cssText='display:block;margin-top:6px;font:700 12px Segoe UI;color:#fff;background:#8250df;border:0;padding:7px 12px;border-radius:7px;cursor:pointer';
       b.onclick=function(ev){ ev.preventDefault(); otOpen(info); };
       (info.accCell||tr.cells[tr.cells.length-1]).appendChild(b);
@@ -1589,21 +1621,35 @@
     try{ el.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){}
     try{ el.blur(); }catch(e){}
   }
+  function flashStatus(msg){ var s=document.getElementById('fm-ot-status'); if(s){ s.textContent=msg; s.style.color='#1a7f37'; } }
+  function pasteInto(fieldName, val, label){
+    copyClip(val);
+    var el=document.querySelector('[name="'+fieldName+'"]');
+    if(el){ try{ el.focus(); }catch(e){} el.value=val; fmFire(el); flashStatus(label+' pegado ✓ ('+val+')'); }
+    else { flashStatus('Copiado '+val+'. Abri el form de turno para pegar '+label); }
+  }
   function altaOverlay(p, status){
     var o=document.getElementById('fm-ot-ov');
     if(!o){ o=document.createElement('div'); o.id='fm-ot-ov';
-      o.style.cssText='position:fixed;top:12px;right:12px;z-index:100000;width:300px;background:#fff;border:2px solid #8250df;border-radius:10px;box-shadow:0 6px 22px rgba(0,0,0,.32);font:13px Segoe UI;color:#1f2328;overflow:hidden';
+      o.style.cssText='position:fixed;top:12px;right:12px;z-index:100000;width:308px;background:#fff;border:2px solid #8250df;border-radius:10px;box-shadow:0 6px 22px rgba(0,0,0,.32);font:13px Segoe UI;color:#1f2328;overflow:hidden';
       document.body.appendChild(o);
     }
-    o.innerHTML='<div style="background:#8250df;color:#fff;font-weight:800;padding:8px 12px;display:flex;justify-content:space-between;align-items:center">🎫 Turno a otorgar<span id="fm-ot-x" style="cursor:pointer">✕</span></div>'
-      +'<div style="padding:10px 12px;line-height:1.5">'
-      +'<div><b>DNI:</b> '+esc(p.dni)+'</div>'
+    var chip='cursor:pointer;background:#efe9fc;border:1px solid #c9b8f2;border-radius:6px;padding:1px 7px;font-weight:800;color:#5a32a3;text-decoration:underline';
+    var html='<div style="background:#8250df;color:#fff;font-weight:800;padding:8px 12px;display:flex;justify-content:space-between;align-items:center">🎫 Turno a otorgar<span id="fm-ot-x" style="cursor:pointer">✕</span></div>'
+      +'<div style="padding:10px 12px;line-height:1.6">'
+      +'<div><b>DNI:</b> <span id="fm-ot-dni" style="'+chip+'" title="Clic: pega en Documento del paciente">'+esc(p.dni)+'</span></div>'
       +'<div><b>Paciente:</b> '+esc(p.pac)+'</div>'
       +'<div><b>Estudio:</b> '+esc((p.cod?p.cod+' ':'')+(p.est||''))+'</div>'
       +'<div><b>Medico:</b> '+esc(p.med)+'</div>'
-      +'<div style="margin-top:8px;padding-top:8px;border-top:1px solid #eee;color:#5a32a3;font-weight:700">'+esc(status||'')+'</div>'
+      +(p.mat ? '<div><b>Matricula:</b> <span id="fm-ot-mat" style="'+chip+'" title="Clic: pega en Mat. Derivante">'+esc(p.mat)+'</span></div>' : '<div style="color:#b3261e"><b>Matricula:</b> no la pude leer del pedido</div>')
+      +(p.os ? '<div><b>O.S.:</b> '+esc(p.os)+'</div>' : '')
+      +'<div style="margin-top:6px;font-size:11px;color:#8a8a8a">Clic en DNI → Documento · clic en Matricula → Mat. Derivante</div>'
+      +'<div id="fm-ot-status" style="margin-top:8px;padding-top:8px;border-top:1px solid #eee;color:#5a32a3;font-weight:700">'+esc(status||'')+'</div>'
       +'</div>';
+    o.innerHTML=html;
     var x=document.getElementById('fm-ot-x'); if(x) x.onclick=function(){ o.remove(); altaClear(); };
+    var dc=document.getElementById('fm-ot-dni'); if(dc) dc.onclick=function(){ pasteInto('_DOCUMENTOPACIENTE', p.dni, 'DNI'); };
+    var mc=document.getElementById('fm-ot-mat'); if(mc) mc.onclick=function(){ pasteInto('_DERIVANTEMATRICULA', p.mat, 'Matricula'); };
   }
   function altaWorker(){
     var raw=altaRead(); if(!raw||!raw.payload) return;
@@ -1611,7 +1657,7 @@
     var p=raw.payload;
     var sv=document.querySelector('[name="_USUARIOSERVICIOID"]');
     var ev=document.querySelector('[name="_ESTUDIOID"]');
-    if(!sv){ if(raw.svDone) altaOverlay(p,'Segui a mano aca: hueco, paciente, financiador'); return; }
+    if(!sv){ if(raw.svDone||raw.esDone) altaOverlay(p,'Segui a mano: hueco, paciente, financiador'); return; }
     raw.n=(raw.n||0)+1; if(raw.n>20){ altaSave(raw); altaOverlay(p,'Revisa a mano (no pude autocompletar)'); return; }
     altaSave(raw);
 
@@ -1623,7 +1669,7 @@
       if(sv.value!==opt.value){
         sv.value=opt.value; raw.svDone=1; altaSave(raw);
         altaOverlay(p,'Cargando estudios de '+opt.text+'…');
-        fmFire(sv); return; // postback recarga la lista de estudios -> reentra
+        fmFire(sv); return;
       }
       raw.svDone=1; altaSave(raw);
     }
@@ -1637,7 +1683,6 @@
         altaOverlay(p,'✓ Servicio y estudio cargados. Segui a mano: hueco, paciente, financiador.');
         return;
       }
-      // lista aun vieja (AJAX no termino) o sin match: reintentar hasta agotar n
       altaOverlay(p,'Buscando el estudio…');
       return;
     }
